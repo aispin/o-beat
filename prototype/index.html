@@ -59,6 +59,7 @@
     <b id="hudScore">0</b>
     <span>SCORE</span>
   </div>
+  <div class="hud-bpm" id="hudBpm"></div>
 </div>
 <button class="icon-btn pause-btn" id="pauseBtn" aria-label="暂停">
   <svg viewBox="0 0 24 24"><path d="M9 5v14M15 5v14"/></svg>
@@ -112,7 +113,19 @@
     <div class="timbre-row" id="timbreRow"></div>
   </div>
 
-  <div class="block">
+  <div class="block hide" id="styleBlock">
+    <div class="block-head"><h2>风格</h2><span class="hint">拍号随风格</span></div>
+    <div class="style-list" id="styleList"></div>
+    <div class="bpm-row">
+      <span class="bpm-k">BPM</span>
+      <button class="bpm-btn" id="bpmDown" aria-label="减慢">−</button>
+      <b id="bpmValue">84</b>
+      <button class="bpm-btn" id="bpmUp" aria-label="加快">+</button>
+      <span class="bpm-note">每 16 小节 +10</span>
+    </div>
+  </div>
+
+  <div class="block" id="songBlock">
     <div class="block-head"><h2 id="songBlockTitle">曲目</h2><span class="hint" id="songHint">16 小节</span></div>
     <div class="song-list" id="songList"></div>
   </div>
@@ -215,6 +228,7 @@
 
   <p class="diag" id="diag"></p>
 
+  <button class="primary hide" id="speedUpBtn">加快速度继续</button>
   <button class="primary" id="againBtn">再来一次</button>
   <button class="ghost" id="homeBtn">返回首页</button>
 </section>

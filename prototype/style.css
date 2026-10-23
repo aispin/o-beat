@@ -972,6 +972,14 @@ body.zone .combo b {
   transition: background 0.5s var(--ease), box-shadow 0.5s var(--ease);
 }
 
+/* 小标题要压得住场景。rock 场景的观众剪影正落在「难度」那一行上，
+   11px 的灰字一旦被剪影切一刀就彻底读不出来了，所以提亮一档 + 补一层贴身的暗影。 */
+.block-head h2,
+.hint {
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9), 0 0 12px rgba(0, 0, 0, 0.6);
+}
+.block-head h2 { color: #BEC6D2; }
+
 /* 难度分段：选中态跟主题走 */
 .seg button.on {
   background: linear-gradient(180deg, rgba(var(--accent-rgb), 0.22), rgba(var(--accent-rgb), 0.07));
@@ -1004,3 +1012,109 @@ body.zone .combo b {
 
 /* 结算页副标题 */
 .grade-sub { color: rgba(var(--accent-rgb), 0.78); }
+
+/* ============================================================
+   节奏模式：风格 + BPM
+   ------------------------------------------------------------
+   风格替代"曲目"：一种风格 = 一个拍号 + 一套重音 + 一个场景。
+   选风格同时换背景与主题色，所以卡面上把拍号直接写出来。
+   ============================================================ */
+#styleBlock.hide, #songBlock.hide { display: none; }
+
+.style-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+
+.style-card {
+  position: relative;
+  text-align: left;
+  padding: 11px 12px 10px;
+  border-radius: var(--r-md);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  box-shadow: var(--bevel);
+  color: var(--text);
+  font-family: inherit;
+  cursor: pointer;
+  overflow: hidden;
+  transition: border-color 0.18s var(--ease), transform 0.16s var(--ease), background 0.18s var(--ease);
+}
+.style-card:active { transform: scale(0.985); }
+.style-card b { display: block; font-size: 14px; font-weight: 700; letter-spacing: 0.3px; }
+.style-card span { display: block; margin-top: 2px; font-size: 11px; color: var(--muted); }
+.style-card em {
+  position: absolute;
+  right: 10px;
+  top: 10px;
+  font-style: normal;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  color: var(--muted);
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  transition: color 0.3s var(--ease), border-color 0.3s var(--ease);
+}
+.style-card.on {
+  border-color: rgba(var(--accent-rgb), 0.46);
+  background: linear-gradient(180deg, rgba(var(--accent-rgb), 0.12), var(--surface-2) 62%);
+  box-shadow: 0 10px 30px -22px var(--accent-glow);
+}
+.style-card.on b { color: var(--accent-a); }
+.style-card.on em { color: var(--accent-a); border-color: rgba(var(--accent-rgb), 0.38); }
+
+/* BPM：风格给缺省值，玩家可以改 */
+.bpm-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 8px 12px;
+  border-radius: var(--r-md);
+  background: var(--surface);
+  border: 1px solid var(--line);
+}
+.bpm-k { font-size: 10px; font-weight: 700; letter-spacing: 1.4px; color: var(--muted); }
+.bpm-row b {
+  min-width: 38px;
+  text-align: center;
+  font-size: 19px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent-a);
+  transition: color 0.4s var(--ease);
+}
+.bpm-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  border: 1px solid rgba(var(--accent-rgb), 0.30);
+  background: rgba(var(--accent-rgb), 0.08);
+  color: var(--accent-a);
+  font-family: inherit;
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.18s var(--ease), border-color 0.18s var(--ease);
+}
+.bpm-btn:active { background: rgba(var(--accent-rgb), 0.20); }
+.bpm-note { margin-left: auto; font-size: 10px; color: var(--muted); }
+
+/* 演奏中的速度读数 */
+.hud-bpm {
+  margin-top: 3px;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 1.1px;
+  color: rgba(var(--accent-rgb), 0.78);
+  font-variant-numeric: tabular-nums;
+  transition: color 0.4s var(--ease);
+}
+.hud-bpm.pulse { animation: bpmPulse 0.5s var(--ease); }
+@keyframes bpmPulse {
+  0% { opacity: 0.35; transform: translateY(-1px); }
+  100% { opacity: 1; transform: none; }
+}
+
+/* 结算页的「加快速度继续」 */
+#speedUpBtn.hide { display: none; }

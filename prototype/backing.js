@@ -221,6 +221,34 @@
       return ev;
     },
 
+    /* 节奏模式：没有伴奏，只有节拍器。
+       每小节自带 bpm（每 16 小节 +10），所以完全按传入的时间轴排，
+       重音轮廓由风格决定（4/4 落在 1、3，7/8 落在 1、4、6）。
+       底鼓只在每小节第一拍点一下，给个"节"的落点。 */
+    buildRhythm(bars, accent, kit) {
+      const S = global.SFX;
+      const ev = [];
+
+      bars.forEach((bar) => {
+        const unit = bar.dur / bar.ticks;          // 一拍：4/4 是四分，7/8 是八分
+        for (let k = 0; k < bar.ticks; k++) {
+          const idx = Math.min(accent.length - 1, Math.round(k * unit * 2));
+          ev.push({
+            at: bar.t + k * unit,
+            fn: (t, a) => S.click(t, a),
+            arg: accent[idx] >= 0.8,
+          });
+        }
+        ev.push({ at: bar.t, fn: (t, k) => S.drum('kick', t, { gain: 0.26, kit: k, duck: 0.08 }), arg: kit });
+      });
+
+      ev.sort((a, b) => a.at - b.at);
+      this.events = ev;
+      this.idx = 0;
+      this.mode = 'rhythm';
+      return ev;
+    },
+
     start(t0, nowFn) {
       this.stop();
       this.t0 = t0;

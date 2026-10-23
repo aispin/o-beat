@@ -46,6 +46,52 @@ function hexToRgb(hex) {
 function ta(alpha) { return 'rgba(' + THEME.rgbStr + ',' + alpha + ')'; }
 function tb(alpha) { return 'rgba(' + THEME.rgbBStr + ',' + alpha + ')'; }
 
+/* 节奏模式的「风格」：一种风格 = 一个拍号 + 一套重音轮廓 + 一批特征动机。
+   BPM 由玩家调，风格只给缺省值和律动倾向。场景跟着风格换，切风格＝整套换肤。 */
+const STYLES = {
+  straight: {
+    id: 'straight', label: 'Straight', cn: '直拍', scene: 'lofi',
+    meter: [4, 4], bpm: 84,
+    accent: [1, 0.45, 0.72, 0.45, 0.9, 0.45, 0.72, 0.45],
+    divs: [1, 2, 3, 4, 5, 6, 8],
+    pool: [4, 3, 2, 1.5, 1, 0.75, 0.5],
+    motifs: [[1, 1, 1, 1], [2, 1, 1], [1.5, 0.5, 1, 1]],
+  },
+  swing: {
+    id: 'swing', label: 'Swing', cn: '摇摆', scene: 'classic',
+    meter: [4, 4], bpm: 96,
+    accent: [1, 0.4, 0.55, 0.4, 0.95, 0.4, 0.55, 0.4],
+    divs: [1, 2, 4, 8],
+    pool: [2, 1.5, 1, 0.5],
+    motifs: [[1, 1, 1.5, 0.5], [2, 1, 1], [1.5, 0.5, 1, 1]],
+  },
+  bossa: {
+    id: 'bossa', label: 'Bossa Nova', cn: '波萨诺瓦', scene: 'cyber',
+    meter: [4, 4], bpm: 92,
+    accent: [1, 0.45, 0.62, 0.5, 0.86, 0.45, 0.62, 0.5],
+    divs: [1, 2, 4, 8],
+    pool: [2, 1.5, 1, 0.75, 0.5],
+    motifs: [[1.5, 1.5, 1], [1, 1.5, 1, 0.5], [0.5, 1, 0.5, 1, 1]],
+  },
+  mathrock: {
+    id: 'mathrock', label: 'Math Rock', cn: '数学摇滚', scene: 'rock',
+    meter: [7, 8], bpm: 120,
+    accent: [1, 0.55, 0.55, 0.9, 0.55, 0.8, 0.55],
+    divs: [7],
+    pool: [1.5, 1, 0.75, 0.5],
+    motifs: [[1.5, 1, 1], [1, 1.5, 1], [0.5, 0.5, 0.75, 0.75, 1]],
+  },
+};
+const STYLE_ORDER = ['straight', 'swing', 'bossa', 'mathrock'];
+
+/* 一小节有多少个四分音符（7/8 → 3.5） */
+function barBeatsOf(st) { return st.meter[0] * 4 / st.meter[1]; }
+
+/* 节奏模式一局的长度：48 小节，每 16 小节 +10 BPM */
+const RHYTHM_BARS = 48;
+const RHYTHM_SEG = 16;
+const RHYTHM_STEP = 10;
+
 const SONGS = [
   { id: 'neon',  name: '霓虹脉冲', tag: '电子 · 正拍', scene: 'cyber',   bpm: 84, meter: 4, root: 72, scale: 'maj', chords: ['C', 'Am', 'F', 'G'] },
   { id: 'city',  name: '城市夜行', tag: '电子 · 切分', scene: 'cyber',   bpm: 96, meter: 4, root: 67, scale: 'maj', chords: ['G', 'D', 'Em', 'C'] },
@@ -119,7 +165,13 @@ const S = {
   phase: 'home',
   mode: 'drummer',
   song: SONGS[0],
+  pick: 'neon',
   diff: 'normal',
+  style: 'straight',
+  bpmBase: STYLES.straight.bpm,
+  lastBpm: STYLES.straight.bpm,
+  bars: [],
+  barNow: 0,
   notes: [],
   layout: null,
   startTime: 0,
@@ -158,7 +210,13 @@ const settings = Object.assign({
   sound: true,
   sceneOn: true,
   timbre: 'wood',
+  style: 'straight',
+  bpm: 0,
 }, JSON.parse(localStorage.getItem('omb.settings') || '{}'));
+
+// BPM 不跨会话：每次冷启动都回落到当前风格的缺省值。
+// 否则「加快速度继续」把上一轮的 174 存住了，第二天打开就是一场打不动的局。
+settings.bpm = 0;
 
 const DIFF_NOTE = {
   drummer: {
@@ -172,9 +230,9 @@ const DIFF_NOTE = {
     strict: '音名隐藏，只能靠听',
   },
   rhythm: {
-    casual: '全音符 / 二分 / 四分 · 只判落点',
-    normal: '加八分、附点与休止 · 只判落点',
-    strict: '三连音与延音线 · 长音符要按满',
+    casual: '每小节时值完全一样 · 只判落点',
+    normal: '加入附点，随机串入其他时值 · 只判落点',
+    strict: '更杂乱但仍在风格里 · 长音符要按满',
   },
 };
 
@@ -344,135 +402,197 @@ function holdJudge() { return !!HOLD_JUDGE[S.diff]; }
 /* 时值块之间留的缝。太小就糊成一条色带，小节里"有几个音"看不出来。 */
 const NOTE_GAP = 6;
 
+/* 一小节等分：easy 的核心规则 —— 每小节所有音时值完全一样。
+   全音符 / 2 个二分 / 3 个三连音 / 4 个四分 / 5 个五连 / 6 个六连，
+   都只是"这一小节切成 N 份"的不同 N。 */
+function uniformBar(st, barBeats, rnd) {
+  const divs = st.divs.filter((n) => barBeats / n >= 0.26);   // 别切出敲不动的碎片
+  const N = divs[Math.floor(rnd() * divs.length)] || 1;
+  const d = barBeats / N;
+  const slots = [];
+  for (let i = 0; i < N; i++) slots.push({ d, rest: false });
+  return slots;
+}
+
+/* 允许出现的时值（拍）。只有这张表里的值才有名字、才画得出准确的块长。
+   切分必须从表里凑，不能用比例硬切 —— 按 0.75 切一个 1.5 会得到 1.125，
+   再切一次就是 0.44，玩家根本没法从长度上认出那是什么音符。 */
+const DUR_SET = [4, 3, 2, 1.5, 1, 0.75, 0.5, 0.25];
+const EPS = 1e-6;
+const near = (a, b) => Math.abs(a - b) < EPS;
+
+/* 把一个时值拆成 2~3 个"有名字"的时值。0.75 + 0.25 就是附点组合，
+   所以"加入附点"和"串入其他时值"在实现上是同一件事。 */
+function splitSpan(span, rnd, strict) {
+  const minD = 0.24;
+  const out = [];
+
+  for (let i = 0; i < DUR_SET.length; i++) {
+    const a = DUR_SET[i];
+    if (a > span - minD + EPS) continue;
+    const b = span - a;
+    if (b < minD - EPS) continue;
+    if (DUR_SET.some((x) => near(x, b))) out.push([a, b]);
+  }
+
+  if (strict) {
+    for (let i = 0; i < DUR_SET.length; i++) {
+      for (let j = 0; j < DUR_SET.length; j++) {
+        const a = DUR_SET[i], b = DUR_SET[j];
+        const c = span - a - b;
+        if (c < minD - EPS) continue;
+        if (!DUR_SET.some((x) => near(x, c))) continue;
+        out.push([a, b, c]);
+      }
+    }
+  }
+
+  if (!out.length) return null;
+  return out[Math.floor(rnd() * out.length)];
+}
+
+/* 熟练 / 挑战：先按等分铺底，再随机把几个音换成别的时值组合。
+   有一定概率直接套一条风格动机 —— 那是"往风格靠"最直接的来源。 */
+function mixedBar(st, barBeats, rnd) {
+  const strict = S.diff === 'strict';
+
+  if (rnd() < (strict ? 0.4 : 0.34)) {
+    const m = st.motifs[Math.floor(rnd() * st.motifs.length)];
+    return m.map((d) => ({ d, rest: false }));
+  }
+
+  // 铺底只用"整小节 / 二分 / 四分"这种一眼能认出来的等分。
+  // 熟练档不给八分铺底，否则一整小节全是 0.5，比 challenge 还密。
+  const bases = strict ? [1, 2, 3, 4, 7, 8] : [1, 2, 3, 4, 7];
+  const coarse = bases.filter((n) => {
+    const d = barBeats / n;
+    return near(d, barBeats) || (d >= 0.5 - EPS && DUR_SET.some((x) => near(x, d)));
+  });
+  const N = coarse[Math.floor(rnd() * coarse.length)] || 1;
+  const slots = [];
+  for (let i = 0; i < N; i++) slots.push({ d: barBeats / N, rest: false });
+
+  const edits = strict ? 2 + Math.floor(rnd() * 2) : 1 + Math.floor(rnd() * 2);
+  for (let k = 0; k < edits; k++) {
+    const idx = [];
+    slots.forEach((s, i) => { if (s.d >= 0.5 - EPS) idx.push(i); });
+    if (!idx.length) break;
+    const i = idx[Math.floor(rnd() * idx.length)];
+    const sub = splitSpan(slots[i].d, rnd, strict);
+    if (sub) slots.splice(i, 1, ...sub.map((d) => ({ d, rest: false })));
+  }
+  return slots;
+}
+
+/* 休止：入门档上限 = 音符数的一半，且不连续；熟练以上只保证不连续 */
+function placeRests(slots, rnd, cap, prob = 0.22) {
+  let placed = 0, run = 0;
+  for (let i = 0; i < slots.length; i++) {
+    if (cap != null && placed >= cap) break;
+    if (i === 0) { run = 0; continue; }                 // 首拍几乎不留白
+    if (run > 0) { run = 0; continue; }                 // 不连续两个休止
+    if (rnd() < prob) { slots[i].rest = true; placed++; run = 1; }
+  }
+  if (slots.every((s) => s.rest)) slots[0].rest = false;
+}
+
+function genBar(st, barBeats, rnd) {
+  const casual = S.diff === 'casual';
+  const slots = casual ? uniformBar(st, barBeats, rnd) : mixedBar(st, barBeats, rnd);
+
+  // 硬约束：一小节必须正好填满，不留悬空
+  const sum = slots.reduce((a, s) => a + s.d, 0);
+  if (!near(sum, barBeats) && slots.length) {
+    slots[slots.length - 1].d += barBeats - sum;
+  }
+
+  // 休止上限。入门档要满足"休止数 ≤ 音符数的一半"：
+  // rests ≤ (n - rests)/2 → rests ≤ n/3，取 floor。一格两格的短小节因此完全不留白。
+  // 另两档放宽到半小节（floor(n/2)），但仍不允许整小节静音。
+  const cap = casual ? Math.floor(slots.length / 3) : Math.floor(slots.length / 2);
+  placeRests(slots, rnd, cap, casual ? 0.28 : 0.22);
+  return slots;
+}
+
 function buildRhythmChart() {
-  const song = S.song;
-  const beat = 60 / song.bpm;
-  const meter = song.meter;
-  const barDur = beat * meter;
+  const st = STYLES[S.style] || STYLES.straight;
+  const barBeats = barBeatsOf(st);
   // 每局都不一样：用时间 + 随机数做种子
   const seed = ((Date.now() ^ Math.floor(Math.random() * 1e9)) >>> 0) || 7;
   const rnd = mulberry32(seed);
 
-  const pool = {
-    casual: [3, 2, 1],
-    normal: [3, 2, 1.5, 1, 0.5],
-    strict: [3, 2, 1.5, 1, 0.75, 0.5, 0.25],
-  }[S.diff].filter((d) => d <= meter + 1e-6);
-
-  const weight = { 3: 2.0, 2: 2.6, 1.5: 1.5, 1: 2.8, 0.75: 1.0, 0.5: 1.6, 0.25: 0.55 };
-  const restP = { casual: 0.10, normal: 0.20, strict: 0.24 }[S.diff];
-
   const notes = [];
   const rests = [];
+  const bars = [];
   let id = 0;
   const push = (n) => { n.id = id++; notes.push(n); };
 
-  for (let bar = 0; bar < CFG.bars; bar++) {
-    const t0 = bar * barDur;
-    const slots = [];
+  // 时间轴：48 小节，每 16 小节 +10 BPM。速度一变，小节在屏幕上也变矮，
+  // 所以每小节自带 dur，绘制一律按各自的小节时长换算。
+  let t = 0;
+  for (let i = 0; i < RHYTHM_BARS; i++) {
+    const seg = Math.floor(i / RHYTHM_SEG);
+    const bpm = S.bpmBase + seg * RHYTHM_STEP;
+    const dur = barBeats * (60 / bpm);
+    bars.push({ i, t, dur, bpm, seg, beats: barBeats, ticks: st.meter[0], den: st.meter[1] });
+    t += dur;
+  }
+  S.bars = bars;
+  S.lastBpm = bars[bars.length - 1].bpm;
 
-    if (bar === CFG.bars - 1) {
-      // 收束：一个长音落到底，不留半拍悬空
-      const long = meter === 4 ? 4 : 3;
-      slots.push({ d: long, rest: false });
-      if (meter - long > 0.01) slots.push({ d: meter - long, rest: true });
-    } else {
-      let budget = meter;
-      let guard = 0;
-      let prev = 0;
-      while (budget > 1e-6 && guard++ < 32) {
-        const cands = pool.filter((d) => d <= budget + 1e-6);
-        if (!cands.length) break;
-        let total = 0;
-        const ws = cands.map((d) => {
-          const w = (weight[d] || 1) * (d === prev ? 0.3 : 1);
-          total += w;
-          return w;
-        });
-        let r = rnd() * total, d = cands[cands.length - 1];
-        for (let i = 0; i < cands.length; i++) { r -= ws[i]; if (r <= 0) { d = cands[i]; break; } }
-        slots.push({ d, rest: false });
-        budget -= d;
-        prev = d;
-      }
-
-      // 休止符：保住小节第一拍，不连续两个
-      let run = 0;
-      slots.forEach((s, i) => {
-        if (i === 0 && rnd() < 0.7) return;
-        s.rest = rnd() < restP;
-        if (s.rest) { if (++run >= 2) s.rest = false; } else run = 0;
-      });
-      if (slots.every((s) => s.rest)) slots[0].rest = false;
-
-      // 连音线：把相邻两个实音接成一个长音，打一次按住到底
-      if (S.diff !== 'casual' && rnd() < 0.5) {
-        for (let i = 0; i < slots.length - 1; i++) {
-          if (!slots[i].rest && !slots[i + 1].rest && rnd() < 0.35) {
-            slots[i].d += slots[i + 1].d;
-            slots[i].tie = true;
-            slots.splice(i + 1, 1);
-          }
-        }
-      }
-
-      // 三连音：两个 1 拍换成 3 个 2/3 拍
-      if (S.diff === 'strict' && rnd() < 0.36) {
-        for (let i = 0; i < slots.length - 1; i++) {
-          if (!slots[i].rest && !slots[i + 1].rest &&
-              Math.abs(slots[i].d - 1) < 1e-6 && Math.abs(slots[i + 1].d - 1) < 1e-6) {
-            const g = id + 1000 + bar;
-            slots.splice(i, 2,
-              { d: 2 / 3, rest: false, trip: g },
-              { d: 2 / 3, rest: false, trip: g },
-              { d: 2 / 3, rest: false, trip: g });
-            break;
-          }
-        }
-      }
-    }
-
+  bars.forEach((bar) => {
+    const beatSec = 60 / bar.bpm;
+    const slots = genBar(st, barBeats, rnd);
     let pos = 0;
     slots.forEach((s) => {
-      const time = t0 + pos * beat;
-      const dur = s.d * beat;
+      const common = {
+        track: 'rhythm', col: 0, bar: bar.i,
+        time: bar.t + pos * beatSec,
+        dur: s.d * beatSec,
+        beats: s.d,
+      };
       if (s.rest) {
-        const r = { track: 'rhythm', col: 0, time, dur, type: 'rest', beats: s.d, status: 'rest' };
-        push(r);
-        rests.push(r);
+        const r = Object.assign({}, common, { type: 'rest', status: 'rest' });
+        push(r); rests.push(r);
       } else {
-        push({
-          track: 'rhythm', col: 0, time, dur,
+        push(Object.assign({}, common, {
           type: s.d >= 1 - 1e-6 ? 'hold' : 'tap',
-          beats: s.d,
           dotted: [3, 1.5, 0.75].some((x) => Math.abs(x - s.d) < 1e-6),
-          tie: !!s.tie,
-          trip: s.trip == null ? null : s.trip,
+          trip: null,
           status: 'pending', grade: null,
-        });
+        }));
       }
       pos += s.d;
     });
-  }
+  });
 
   notes.sort((a, b) => a.time - b.time);
   S.rests = rests;
-  S.totalDur = CFG.bars * barDur;
+  S.totalDur = t;
   return notes;
 }
 
 /* ============================================================
    布局
    ============================================================ */
+function curStyle() { return STYLES[S.style] || STYLES.straight; }
+function curBpm() { return settings.bpm > 0 ? settings.bpm : curStyle().bpm; }
+
+/* 第一小节的时长：整局的滚动速度由它定，后面 BPM 变高只会让格子变矮 */
+function rhythmFirstBarDur() {
+  if (S.bars && S.bars.length) return S.bars[0].dur;
+  return barBeatsOf(curStyle()) * (60 / curBpm());
+}
+
 function computeLayout() {
   const W = view.w, H = view.h;
   const judgeY = H * CFG.layout.judge;
-  // 节奏模式按小节定速：一屏正好看到约 2 个小节格子
-  // 每一小节是一个等高容器，格子数固定才能建立"小节"这个单位
+  // 节奏模式按小节定速：一屏正好看到约 2 个小节格子。
+  // 速度是"像素/秒"，全程不变；BPM 升上去时同一小节占的秒数变少，
+  // 格子自然变矮 —— 加速这件事本身就看得见。
   let speed;
   if (S.mode === 'rhythm') {
-    const barDur = (60 / S.song.bpm) * S.song.meter;
-    const look = barDur * BAR_LOOK + 0.6;
+    const look = rhythmFirstBarDur() * BAR_LOOK + 0.6;
     speed = (judgeY - CFG.layout.spawn) / look;
   } else {
     speed = (judgeY - CFG.layout.spawn) / settings.lookahead;
@@ -485,9 +605,6 @@ function computeLayout() {
     L.laneW = w;
     // 卷帘顶界：避开顶部 HUD（分数 / 暂停），长音符从这里"浮出"而不是盖住分数
     L.top = Math.round(Math.min(96, H * 0.14));
-    // 小节格子的三围：高固定，块全部按比例塞进格子里
-    L.barDur = (60 / S.song.bpm) * S.song.meter;
-    L.barH = L.barDur * speed;
     L.barGap = 4;
     L.pad = null;
     L.mel = null;
@@ -639,11 +756,13 @@ function drawRhythmLane() {
   const x = L.lane.x, w = L.lane.w;
   const top = L.top;
 
-  // 压暗的卷帘底：保证块与灰段都能看清
+  // 压暗的卷帘底：保证块与灰段都能看清。
+  // 必须够重 —— rock 场景的灯柱扫过来时是接近白色的，
+  // 0.4 的遮罩压不住，块会整片消失。
   const g = c.createLinearGradient(0, top, 0, L.judgeY);
-  g.addColorStop(0, 'rgba(8,10,16,0.42)');
-  g.addColorStop(0.75, 'rgba(8,10,16,0.58)');
-  g.addColorStop(1, 'rgba(8,10,16,0.72)');
+  g.addColorStop(0, 'rgba(8,10,16,0.58)');
+  g.addColorStop(0.75, 'rgba(8,10,16,0.70)');
+  g.addColorStop(1, 'rgba(8,10,16,0.84)');
   c.fillStyle = g;
   c.fillRect(x, top, w, L.judgeY - top);
 
@@ -653,26 +772,35 @@ function drawRhythmLane() {
   c.beginPath(); c.moveTo(x + w - 0.5, top); c.lineTo(x + w - 0.5, L.judgeY); c.stroke();
 
   const t = Math.max(0, elapsed());
-  const barDur = L.barDur;
-  const visible = (L.judgeY - top) / L.speed;
-  const first = Math.max(0, Math.floor(t / barDur) - 1);
-  const last = Math.min(CFG.bars - 1, Math.ceil((t + visible) / barDur));
-
-  for (let b = first; b <= last; b++) {
-    const bottom = L.judgeY - (b * barDur - t) * L.speed;
-    const y0 = bottom - L.barH + L.barGap / 2;
-    const h = L.barH - L.barGap;
-    if (bottom < top - 4 || y0 > L.judgeY + 4) continue;
-    drawRhythmBar(b, y0, h, t);
-  }
+  visibleBars(t).forEach((v) => drawRhythmBar(v.b, v.y0, v.h, t));
 }
 
-/* 单个小节格子：底、描边、拍刻度、小节号 */
+/* 当前可见的小节：y 与高度都按各自的小节时长算。
+   BPM 每 16 小节升一档，同一小节占的秒数变少 → 格子变矮，
+   所以不能再用一个全局 barH。 */
+function visibleBars(t) {
+  const L = S.layout;
+  const out = [];
+  const bars = S.bars;
+  if (!bars || !bars.length) return out;
+  for (let i = 0; i < bars.length; i++) {
+    const b = bars[i];
+    const bottom = L.judgeY - (b.t - t) * L.speed;
+    const bh = b.dur * L.speed;
+    const y0 = bottom - bh + L.barGap / 2;
+    const h = bh - L.barGap;
+    if (bottom < L.top - 4 || y0 > L.judgeY + 4) continue;
+    out.push({ b, bottom, y0, h });
+  }
+  return out;
+}
+
+/* 单个小节格子：底、描边、拍刻度 */
 function drawRhythmBar(b, y0, h, t) {
   const L = S.layout, c = ctx;
   const x = L.lane.x, w = L.lane.w;
-  const beatN = S.song.meter;
-  const live = t >= b * L.barDur && t < (b + 1) * L.barDur;
+  const beatN = b.ticks || 4;
+  const live = t >= b.t && t < b.t + b.dur;
 
   c.save();
   c.beginPath();
@@ -708,10 +836,6 @@ function drawRhythmBar(b, y0, h, t) {
 function drawRhythmBarMarks() {
   const L = S.layout, c = ctx;
   const t = Math.max(0, elapsed());
-  const barDur = L.barDur;
-  const visible = (L.judgeY - L.top) / L.speed;
-  const first = Math.max(0, Math.floor(t / barDur) - 1);
-  const last = Math.min(CFG.bars - 1, Math.ceil((t + visible) / barDur));
   const x = L.lane.x, w = L.lane.w;
 
   c.save();
@@ -722,18 +846,15 @@ function drawRhythmBarMarks() {
   c.textBaseline = 'top';
   c.font = '700 9px -apple-system, sans-serif';
 
-  for (let b = first; b <= last; b++) {
-    const bottom = L.judgeY - (b * barDur - t) * L.speed;
-    const y0 = bottom - L.barH + L.barGap / 2;
-    const h = L.barH - L.barGap;
-    if (bottom < L.top - 4 || y0 > L.judgeY + 4 || h < 24) continue;
-    const live = t >= b * barDur && t < (b + 1) * barDur;
+  visibleBars(t).forEach(({ b, bottom, y0, h }) => {
+    if (h < 24) return;
+    const live = t >= b.t && t < b.t + b.dur;
 
     // 小节线：落在两格之间那道 4px 缝的正中，不通到格子里，
     // 这样它是"分界"而不是"把块切断"。必须够亮 —— 缝隙只有 4px，
     // 一条 0.2 alpha 的细线在暗底上等于没画。
-    if (b > 0) {
-      const sepY = bottom - L.barH;
+    if (b.i > 0) {
+      const sepY = bottom - b.dur * L.speed;
       if (sepY > L.top + 1) {
         c.strokeStyle = live ? ta(0.62) : 'rgba(255,255,255,0.34)';
         c.lineWidth = 1.5;
@@ -746,8 +867,8 @@ function drawRhythmBarMarks() {
 
     // 小节号：格子内部右上角，落在块的右侧槽边里，不压块
     c.fillStyle = live ? ta(0.92) : 'rgba(255,255,255,0.46)';
-    c.fillText(String(b + 1), x + w - 10, y0 + 6);
-  }
+    c.fillText(String(b.i + 1), x + w - 10, y0 + 6);
+  });
   c.restore();
 }
 
@@ -828,14 +949,14 @@ function drawRhythmPad() {
 function drawRhythmNote(n, t) {
   const L = S.layout, c = ctx;
   const g = noteGeom(n);
-  const barDur = L.barDur;
-  const bar = Math.floor(n.time / barDur + 1e-6);
-  const barBottom = L.judgeY - (bar * barDur - t) * L.speed;
+  const bar = S.bars[n.bar];
+  if (!bar) return;
+  const barBottom = L.judgeY - (bar.t - t) * L.speed;
   // 块不完全按 dur×speed 算，而是按"在这一小节里占几成"换算 ——
   // 这样无论小节多长，块都严格落在格子内，全音符正好填满一格。
-  const p0 = clamp((n.time - bar * barDur) / barDur, 0, 1);
-  const p1 = clamp((n.time + n.dur - bar * barDur) / barDur, 0, 1);
-  const inner = L.barH - L.barGap;
+  const p0 = clamp((n.time - bar.t) / bar.dur, 0, 1);
+  const p1 = clamp((n.time + n.dur - bar.t) / bar.dur, 0, 1);
+  const inner = bar.dur * L.speed - L.barGap;
   const yOf = (p) => barBottom - L.barGap / 2 - p * inner;
 
   const bottom = yOf(p0);
@@ -845,7 +966,7 @@ function drawRhythmNote(n, t) {
   if (h < 2) return;
 
   const x = g.cx - g.w / 2, w = g.w;
-  const beat = 60 / S.song.bpm;
+  const beat = 60 / bar.bpm;
 
   c.save();
   // 只画卷帘内部：上不盖 HUD，下不越过判定线（落到击打区交给 pad）
@@ -898,9 +1019,9 @@ function drawRhythmNote(n, t) {
   c.globalAlpha = missed ? 0.24 : 1;
 
   const grad = c.createLinearGradient(0, top, 0, bottom);
-  grad.addColorStop(0, hexA(color, 0.10));
-  grad.addColorStop(0.55, hexA(color, holding ? 0.36 : 0.17));
-  grad.addColorStop(1, hexA(color, holding ? 0.58 : 0.30));
+  grad.addColorStop(0, hexA(color, holding ? 0.40 : 0.30));
+  grad.addColorStop(0.55, hexA(color, holding ? 0.52 : 0.42));
+  grad.addColorStop(1, hexA(color, holding ? 0.64 : 0.56));
 
   // 先铺一层深底：任何场景下都要能读清
   c.fillStyle = missed ? 'rgba(26,30,38,0.6)' : 'rgba(9,12,18,0.66)';
@@ -919,7 +1040,7 @@ function drawRhythmNote(n, t) {
     c.strokeStyle = hexA(color, 0.20);
     c.lineWidth = 1;
     for (let k = 1; k * beat < n.dur - 1e-6; k++) {
-      const yy = bottom - (k * beat / barDur) * inner;
+      const yy = bottom - (k * beat / bar.dur) * inner;
       if (yy > top + 3 && yy < bottom - 8) {
         c.beginPath();
         c.moveTo(x + 7, yy);
@@ -981,15 +1102,16 @@ function drawRhythmNote(n, t) {
   c.restore();
 }
 
+/* 时值标签：全用乐谱上的分数写法。
+   「1.33 拍」这种读数没人看得懂，能写成 1⅓ 就写成 1⅓。 */
+const BEAT_LABEL = [
+  [4, '4'], [3.5, '3½'], [3, '3'], [8 / 3, '2⅔'], [2, '2'], [1.5, '1½'],
+  [4 / 3, '1⅓'], [1, '1'], [0.8, '⅘'], [0.75, '¾'], [2 / 3, '⅔'], [0.5, '½'], [0.25, '¼'],
+];
 function fmtBeats(b) {
-  if (Math.abs(b - 4) < 1e-6) return '4';
-  if (Math.abs(b - 3) < 1e-6) return '3';
-  if (Math.abs(b - 2) < 1e-6) return '2';
-  if (Math.abs(b - 1.5) < 1e-6) return '1½';
-  if (Math.abs(b - 1) < 1e-6) return '1';
-  if (Math.abs(b - 0.75) < 1e-6) return '¾';
-  if (Math.abs(b - 0.5) < 1e-6) return '½';
-  if (Math.abs(b - 2 / 3) < 1e-6) return '⅔';
+  for (let i = 0; i < BEAT_LABEL.length; i++) {
+    if (Math.abs(b - BEAT_LABEL[i][0]) < 1e-6) return BEAT_LABEL[i][1];
+  }
   return String(Math.round(b * 100) / 100);
 }
 
@@ -1565,6 +1687,7 @@ function update(t) {
 
   if (S.mode === 'rhythm') {
     S.rhythmRest = activeRest(t);
+    updateHudBpm(t);
   }
 
   // 拍脉冲
@@ -1683,9 +1806,12 @@ function updateCountdown(t) {
 function startRun() {
   AudioEng.init();
   AudioEng.setMute(!settings.sound);
+
+  // 先出谱面：节奏模式会顺便排出 48 小节的时间轴与 BPM 阶梯，
+  // 布局的滚动速度要靠第一小节的时长来定，所以顺序不能反。
+  S.notes = buildChart();
   computeLayout();
 
-  S.notes = buildChart();
   S.score = 0;
   S.combo = 0;
   S.maxCombo = 0;
@@ -1705,7 +1831,7 @@ function startRun() {
   S.beatPulse = 0;
   S.phase = 'playing';
 
-  const beat = 60 / S.song.bpm;
+  const beat = 60 / (S.mode === 'rhythm' ? S.bars[0].bpm : S.song.bpm);
   const lead = CFG.time.countdownBeats * beat + 0.35;
   S.startTime = AudioEng.now() + lead;
 
@@ -1713,14 +1839,38 @@ function startRun() {
     AudioEng.click(S.startTime - (CFG.time.countdownBeats - i) * beat, i === 0);
   }
 
-  Backing.build(S.song, CFG.bars, S.mode === 'rhythm' ? 'rhythm' : 'music');
+  if (S.mode === 'rhythm') {
+    const st = curStyle();
+    Backing.buildRhythm(S.bars, st.accent, SCENE_KIT[st.scene] || 'acoustic');
+  } else {
+    Backing.build(S.song, CFG.bars, 'music');
+  }
   Backing.start(S.startTime, () => AudioEng.now());
 
   $('#hudScore').textContent = '0';
+  S.barNow = -1;
+  updateHudBpm(0);
   $('#combo').classList.remove('show');
   document.body.classList.add('ingame');
   document.body.classList.remove('zone');
   showScreen(null);
+}
+
+/* 演奏中的速度读数：让「每 16 小节 +10」这件事在屏幕上看得见 */
+function updateHudBpm(t) {
+  const el = $('#hudBpm');
+  if (!el) return;
+  if (S.mode !== 'rhythm' || !S.bars.length) { el.textContent = ''; return; }
+  let idx = 0;
+  for (let i = 0; i < S.bars.length; i++) { if (t >= S.bars[i].t) idx = i; else break; }
+  const b = S.bars[idx];
+  if (S.barNow !== idx) {
+    S.barNow = idx;
+    el.textContent = b.bpm + ' BPM · ' + (idx + 1) + '/' + S.bars.length;
+    el.classList.remove('pulse');
+    void el.offsetWidth;
+    el.classList.add('pulse');
+  }
 }
 
 function endRun() {
@@ -1774,8 +1924,21 @@ function endRun() {
       diag += ' 时值很干净：该停的地方停了，该拖的地方拖满了。';
     }
     if (!holdJudge()) diag += ' 这一档只判落点，去挑战档再练按满。';
+    diag += ' 这一轮 ' + (S.bars[0] ? S.bars[0].bpm : curBpm()) + ' → ' + S.lastBpm + ' BPM。';
   }
   $('#diag').textContent = diag;
+
+  // 「加快速度继续」只在节奏模式出现：48 小节走完，BPM 再加一档接着来
+  const speed = $('#speedUpBtn');
+  if (speed) {
+    const on = S.mode === 'rhythm';
+    speed.classList.toggle('hide', !on);
+    if (on) speed.textContent = '加快速度继续 · ' + (S.lastBpm + RHYTHM_STEP) + ' BPM';
+    // 两个主按钮并排会抢焦点，加快是主行动，再来一次退成次要按钮
+    const again = $('#againBtn');
+    again.classList.toggle('ghost', on);
+    again.classList.toggle('primary', !on);
+  }
 
   showScreen('screenResult');
 }
@@ -1822,20 +1985,71 @@ function renderTimbres() {
   });
 }
 
+/* 节奏模式用「风格」生成一个虚拟曲目：拍号、场景、BPM 全部跟着风格走，
+   这样 applyScene / 节拍 / 主题色都能沿用原来的通路。 */
+function styleSong() {
+  const st = curStyle();
+  return {
+    id: 'style:' + st.id, name: st.label, tag: st.cn, scene: st.scene,
+    bpm: curBpm(), meter: st.meter[0], den: st.meter[1],
+    root: 72, scale: 'maj', chords: ['C', 'Am', 'F', 'G'],
+  };
+}
+
 /* 模式切换时，首页各块的文案与可见性 */
 function updateModeChrome() {
   document.body.dataset.mode = S.mode;
   const rhythm = S.mode === 'rhythm';
   $('#diffNote').textContent = DIFF_NOTE[S.mode][S.diff];
   $('#startBtn').textContent = rhythm ? '开始练习' : '开始演奏';
-  $('#songHint').textContent = rhythm
-    ? '随机谱面 · ' + CFG.bars + ' 小节'
-    : Math.round(CFG.bars * S.song.meter * 60 / S.song.bpm) + ' 秒';
   $('#timbreBlock').classList.toggle('hide', !rhythm);
-  $('#songBlockTitle').textContent = rhythm ? '伴奏' : '曲目';
+  $('#styleBlock').classList.toggle('hide', !rhythm);
+  $('#songBlock').classList.toggle('hide', rhythm);
+  if (!rhythm) {
+    $('#songHint').textContent = Math.round(CFG.bars * S.song.meter * 60 / S.song.bpm) + ' 秒';
+  }
   $$('.only-melodist').forEach((el) => el.classList.toggle('dim', rhythm));
   if (rhythm) $('#foot').textContent = '跟着节拍器敲 · 灰色段要留白 · 没有失败';
   else $('#foot').textContent = '跟着拍子敲准就好 · 没有失败';
+  renderStyles();
+  renderBpm();
+}
+
+function renderStyles() {
+  $('#styleList').innerHTML = STYLE_ORDER.map((k) => {
+    const st = STYLES[k];
+    return '<button class="style-card' + (k === S.style ? ' on' : '') + '" data-s="' + k + '">' +
+      '<b>' + st.label + '</b>' +
+      '<span>' + st.cn + '</span>' +
+      '<em>' + st.meter[0] + '/' + st.meter[1] + '</em></button>';
+  }).join('');
+  $$('#styleList .style-card').forEach((el) => {
+    el.addEventListener('click', () => {
+      S.style = el.dataset.s;
+      const st = curStyle();
+      settings.style = S.style;
+      settings.bpm = st.bpm;
+      S.bpmBase = st.bpm;
+      saveSettings();
+      S.song = styleSong();
+      applyScene(S.song);
+      computeLayout();
+      updateModeChrome();
+    });
+  });
+}
+
+function renderBpm() {
+  const el = $('#bpmValue');
+  if (!el) return;
+  el.textContent = String(curBpm());
+}
+
+function stepBpm(d) {
+  settings.bpm = clamp(curBpm() + d, 40, 200);
+  S.bpmBase = settings.bpm;
+  saveSettings();
+  renderBpm();
 }
 
 /* ============================================================
@@ -1849,14 +2063,15 @@ function showScreen(id) {
 
 function renderSongs() {
   $('#songList').innerHTML = SONGS.map((s) => (
-    '<button class="song' + (s.id === S.song.id ? ' on' : '') + '" data-id="' + s.id + '"' +
+    '<button class="song' + (s.id === S.pick ? ' on' : '') + '" data-id="' + s.id + '"' +
     ' style="--accent:' + (SCENES[s.scene] || SCENES.lofi).a + '">' +
     '<span class="dot"></span><b>' + s.name + '</b><span>' + s.tag + '</span>' +
     '<em>' + s.bpm + ' BPM · ' + s.meter + '/4</em></button>'
   )).join('');
   $$('#songList .song').forEach((el) => {
     el.addEventListener('click', () => {
-      S.song = SONGS.find((x) => x.id === el.dataset.id);
+      S.pick = el.dataset.id;
+      S.song = SONGS.find((x) => x.id === S.pick) || SONGS[0];
       $$('#songList .song').forEach((x) => x.classList.remove('on'));
       el.classList.add('on');
       applyScene(S.song);
@@ -1871,6 +2086,11 @@ function bindUI() {
       S.mode = el.dataset.mode;
       $$('#modeRow .mode-card').forEach((x) => x.classList.remove('on'));
       el.classList.add('on');
+      // 进出节奏模式时切换「曲目 / 风格」这套语境
+      S.song = S.mode === 'rhythm'
+        ? styleSong()
+        : (SONGS.find((x) => x.id === S.pick) || SONGS[0]);
+      applyScene(S.song);
       computeLayout();
       updateModeChrome();
     });
@@ -1887,6 +2107,17 @@ function bindUI() {
   });
 
   $('#startBtn').addEventListener('click', startRun);
+
+  $('#bpmUp').addEventListener('click', () => stepBpm(2));
+  $('#bpmDown').addEventListener('click', () => stepBpm(-2));
+
+  // 48 小节走完，BPM 再加一档，接着下一轮
+  $('#speedUpBtn').addEventListener('click', () => {
+    S.bpmBase = S.lastBpm + RHYTHM_STEP;
+    settings.bpm = S.bpmBase;
+    saveSettings();
+    startRun();
+  });
 
   $('#settingsBtn').addEventListener('click', () => {
     $('#sheet').classList.remove('hide');
@@ -1960,6 +2191,7 @@ function bindUI() {
     S.phase = 'home';
     ctx.clearRect(0, 0, view.w, view.h);
     document.body.classList.remove('ingame');
+    renderBpm();
     showScreen('screenHome');
   });
 
@@ -1994,6 +2226,8 @@ if (!glOk) {
 resize();
 bindUI();
 renderSongs();
+if (settings.style && STYLES[settings.style]) S.style = settings.style;
+S.bpmBase = curBpm();
 applyScene(S.song);
 $('#sheet').classList.add('hide');
 $('#screenResult').classList.add('hide');
