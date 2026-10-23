@@ -21,7 +21,6 @@ const CFG = {
 };
 
 const DRUM_COLOR = ['#5B8CFF', '#FF7A59', '#35D0BA', '#C084FC'];
-const PAD_COLOR = '#35D0BA';
 const MEL_COLOR = '#FFC94D';
 const GRADE_COLOR = { perfect: '#4ADE80', great: '#FFC94D', good: '#60A5FA', miss: '#4B5563' };
 
@@ -32,6 +31,20 @@ const SCENES = {
   lofi:    { label: '慵懒房间', a: '#FFB066', b: '#7D9BC4', glow: 'rgba(255,176,102,0.36)' },
   rock:    { label: 'Live 舞台', a: '#FF4A3D', b: '#FFC98A', glow: 'rgba(255,74,61,0.44)' },
 };
+
+/* 当前主题：CSS 用变量，Canvas 用 rgb 三元组，两边必须同源 */
+const THEME = { a: '#35D0BA', b: '#5B8CFF', rgb: [53, 208, 186], rgbStr: '53,208,186', rgbBStr: '91,140,255' };
+
+function hexToRgb(hex) {
+  let h = String(hex).replace('#', '');
+  if (h.length === 3) h = h.replace(/./g, '$&$&');
+  const n = parseInt(h, 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+/* 在 RGB 基础上加透明度的便捷写法：ta = 主强调色，tb = 次强调色 */
+function ta(alpha) { return 'rgba(' + THEME.rgbStr + ',' + alpha + ')'; }
+function tb(alpha) { return 'rgba(' + THEME.rgbBStr + ',' + alpha + ')'; }
 
 const SONGS = [
   { id: 'neon',  name: '霓虹脉冲', tag: '电子 · 正拍', scene: 'cyber',   bpm: 84, meter: 4, root: 72, scale: 'maj', chords: ['C', 'Am', 'F', 'G'] },
@@ -490,9 +503,9 @@ function noteGeom(n) {
 }
 
 function noteColor(n) {
-  if (n.track === 'rhythm') return n.type === 'rest' ? '#8C94A6' : MEL_COLOR;
+  if (n.track === 'rhythm') return n.type === 'rest' ? '#8C94A6' : THEME.a;
   if (n.track === 'drum') return DRUM_COLOR[n.col];
-  if (n.track === 'pad') return PAD_COLOR;
+  if (n.track === 'pad') return THEME.b;
   return MEL_COLOR;
 }
 
@@ -525,11 +538,11 @@ function drawLanes() {
   if (L.mel) {
     if (L.pad) {
       const pg = c.createLinearGradient(0, 0, L.pad.w, 0);
-      pg.addColorStop(0, 'rgba(53,208,186,0.11)');
-      pg.addColorStop(1, 'rgba(53,208,186,0.02)');
+      pg.addColorStop(0, tb(0.13));
+      pg.addColorStop(1, tb(0.02));
       c.fillStyle = pg;
       c.fillRect(0, 0, L.pad.w, H);
-      c.strokeStyle = 'rgba(53,208,186,0.26)';
+      c.strokeStyle = tb(0.28);
       c.beginPath(); c.moveTo(L.pad.w, 0); c.lineTo(L.pad.w, H); c.stroke();
       c.strokeStyle = 'rgba(255,255,255,0.025)';
       for (let i = 1; i < 5; i++) {
@@ -557,7 +570,7 @@ function drawLanes() {
     if (L.pad) {
       c.save();
       c.globalAlpha = 0.34;
-      c.fillStyle = '#35D0BA';
+      c.fillStyle = THEME.b;
       c.font = '600 10px -apple-system, sans-serif';
       c.textAlign = 'center';
       c.textBaseline = 'middle';
@@ -660,8 +673,8 @@ function drawRhythmPad() {
     grad.addColorStop(0, 'rgba(140,148,166,' + (0.10 + press * 0.08) + ')');
     grad.addColorStop(1, 'rgba(140,148,166,0.03)');
   } else {
-    grad.addColorStop(0, 'rgba(255,201,77,' + (0.08 + press * 0.16) + ')');
-    grad.addColorStop(1, 'rgba(255,201,77,' + (0.02 + press * 0.05) + ')');
+    grad.addColorStop(0, ta(0.08 + press * 0.16));
+    grad.addColorStop(1, ta(0.02 + press * 0.05));
   }
   c.fillStyle = grad;
   roundRect(c, pad.x, pad.y, pad.w, pad.h, 20);
@@ -669,7 +682,7 @@ function drawRhythmPad() {
 
   c.strokeStyle = rest
     ? 'rgba(140,148,166,' + (0.20 + press * 0.25) + ')'
-    : 'rgba(255,201,77,' + (0.20 + press * 0.42) + ')';
+    : ta(0.20 + press * 0.42);
   c.lineWidth = 1.5;
   c.stroke();
 
@@ -680,9 +693,9 @@ function drawRhythmPad() {
   const r = 22 + press * 10;
   c.beginPath();
   c.arc(cx, cy, r, 0, Math.PI * 2);
-  c.fillStyle = rest ? 'rgba(140,148,166,0.10)' : 'rgba(255,201,77,' + (0.07 + press * 0.20) + ')';
+  c.fillStyle = rest ? 'rgba(140,148,166,0.10)' : ta(0.07 + press * 0.20);
   c.fill();
-  c.strokeStyle = rest ? 'rgba(140,148,166,0.24)' : 'rgba(255,201,77,' + (0.28 + press * 0.4) + ')';
+  c.strokeStyle = rest ? 'rgba(140,148,166,0.24)' : ta(0.28 + press * 0.4);
   c.lineWidth = 1;
   c.stroke();
 
@@ -696,10 +709,10 @@ function drawRhythmPad() {
     c.font = '500 10px -apple-system, sans-serif';
     c.fillText('这一段别敲', cx, cy + 20);
   } else {
-    c.fillStyle = 'rgba(255,201,77,' + (0.5 + press * 0.45) + ')';
+    c.fillStyle = ta(0.5 + press * 0.45);
     c.font = '600 13px -apple-system, sans-serif';
     c.fillText('敲 击', cx, cy);
-    c.fillStyle = 'rgba(255,201,77,0.30)';
+    c.fillStyle = ta(0.30);
     c.font = '500 10px -apple-system, sans-serif';
     c.fillText('长音符按住不放', cx, cy + 20);
   }
@@ -766,7 +779,7 @@ function drawRhythmNote(n, t) {
 
   const missed = n.status === 'miss';
   const holding = n.status === 'holding';
-  const color = missed ? '#3A4150' : (n.trip != null ? '#7DD3FC' : MEL_COLOR);
+  const color = missed ? '#3A4150' : (n.trip != null ? THEME.b : THEME.a);
   c.globalAlpha = missed ? 0.24 : 1;
 
   const grad = c.createLinearGradient(0, top, 0, bottom);
@@ -874,9 +887,9 @@ function drawHitZone() {
   const zoneH = L.H - L.judgeY;
 
   const grad = c.createLinearGradient(0, L.judgeY, 0, L.H);
-  grad.addColorStop(0, 'rgba(53,208,186,0.07)');
-  grad.addColorStop(0.55, 'rgba(53,208,186,0.015)');
-  grad.addColorStop(1, 'rgba(53,208,186,0)');
+  grad.addColorStop(0, ta(0.07));
+  grad.addColorStop(0.55, ta(0.015));
+  grad.addColorStop(1, ta(0));
   c.fillStyle = grad;
   c.fillRect(0, L.judgeY, L.W, zoneH);
 
@@ -898,7 +911,7 @@ function drawJudgeLine() {
   const rhythm = S.mode === 'rhythm';
   const x0 = rhythm ? L.lane.x : 0;
   const x1 = rhythm ? L.lane.x + L.lane.w : L.W;
-  const accent = rhythm ? '255,201,77' : '53,208,186';
+  const accent = THEME.rgbStr;
 
   const glow = c.createLinearGradient(0, L.judgeY - 64, 0, L.judgeY + 2);
   glow.addColorStop(0, 'rgba(' + accent + ',0)');
@@ -948,8 +961,8 @@ function drawNote(n, t) {
       const dim = n.status === 'miss';
       if (dim) c.globalAlpha = 0.26;
       const h = Math.max(4, bottom - top);
-      c.fillStyle = 'rgba(53,208,186,0.16)';
-      c.strokeStyle = 'rgba(53,208,186,0.55)';
+      c.fillStyle = hexA(color, 0.16);
+      c.strokeStyle = hexA(color, 0.55);
       c.lineWidth = 1;
       roundRect(c, g.cx - g.w / 2, top, g.w, h, Math.min(14, g.w / 2));
       c.fill(); c.stroke();
@@ -1483,9 +1496,19 @@ function applyScene(song) {
   const sc = SCENES[song.scene] || SCENES.lofi;
   document.body.dataset.scene = song.scene;
   document.body.classList.toggle('no-scene', !settings.sceneOn);
-  document.documentElement.style.setProperty('--accent-a', sc.a);
-  document.documentElement.style.setProperty('--accent-b', sc.b);
-  document.documentElement.style.setProperty('--accent-glow', sc.glow);
+
+  THEME.a = sc.a;
+  THEME.b = sc.b;
+  THEME.rgb = hexToRgb(sc.a);
+  THEME.rgbStr = THEME.rgb.join(',');
+  THEME.rgbBStr = hexToRgb(sc.b).join(',');
+
+  const root = document.documentElement.style;
+  root.setProperty('--accent-a', sc.a);
+  root.setProperty('--accent-b', sc.b);
+  root.setProperty('--accent-glow', sc.glow);
+  root.setProperty('--accent-rgb', THEME.rgbStr);
+  root.setProperty('--accent-b-rgb', THEME.rgbBStr);
   if (window.Scene && Scene.gl) {
     Scene.canvas.style.opacity = settings.sceneOn ? '1' : '0';
     if (settings.sceneOn) Scene.use(song.scene);

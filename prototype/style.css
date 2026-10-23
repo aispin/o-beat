@@ -38,6 +38,8 @@
   /* 由场景注入，切歌时整体换色 */
   --accent-a: #35D0BA;
   --accent-b: #5B8CFF;
+  --accent-rgb: 53, 208, 186;
+  --accent-b-rgb: 91, 140, 255;
   --accent-glow: rgba(53, 208, 186, 0.45);
 
   --r-sm: 10px;
@@ -286,8 +288,20 @@ body.ingame .veil,
 }
 
 /* ---------------- 搞怪音色 ---------------- */
-.timbre-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+/* 单行横滑：一屏露出 4 个半，第 5 个的边角就是"还能滑"的提示。
+   纵向只占一行高度，避免把「开始演奏」和难度挤出首屏。 */
+.timbre-row {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  padding-bottom: 2px;
+}
+.timbre-row::-webkit-scrollbar { display: none; }
 .timbre {
+  flex: 0 0 calc((100% - 24px) / 4.3);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -432,6 +446,23 @@ body.ingame .veil,
   box-shadow: 0 16px 40px -16px var(--accent-glow), inset 0 1px 0 rgba(255, 255, 255, 0.42);
   transition: transform 0.12s var(--ease), box-shadow 0.4s var(--ease), background 0.5s var(--ease);
 }
+
+/* 常驻底部：内容再长（比如节奏模式多了音色网格）也总能看到「开始演奏」 */
+#screenHome { padding-bottom: 0; }
+.home-cta {
+  position: sticky;
+  bottom: 0;
+  z-index: 6;
+  margin: 0 -20px;
+  padding: 26px 20px calc(22px + env(safe-area-inset-bottom));
+  background: linear-gradient(180deg,
+    rgba(7, 9, 13, 0) 0%,
+    rgba(7, 9, 13, 0.72) 34%,
+    rgba(7, 9, 13, 0.93) 62%,
+    rgba(7, 9, 13, 0.97) 100%);
+}
+.home-cta .primary { margin-top: 0; }
+.home-cta .foot { margin-top: 10px; }
 .primary::after {
   content: "";
   position: absolute;
@@ -908,3 +939,68 @@ body.zone .combo b {
 @media (prefers-reduced-motion: reduce) {
   .primary::after { animation: none; }
 }
+
+/* ============================================================
+   场景主题着色
+   ------------------------------------------------------------
+   切歌即换肤：除了主按钮和 Logo，区块标题、分段控件、曲目卡、
+   设置入口、HUD 标签都跟着走，让"这首歌的氛围"是整屏的，而不是局部的。
+   全部基于 --accent-* 变量，换色只需改 SCENES 里的一行。
+   ============================================================ */
+
+/* 顶部场景胶囊 */
+.brand-scene {
+  color: var(--accent-a);
+  border-color: rgba(var(--accent-rgb), 0.34);
+  background: rgba(var(--accent-rgb), 0.10);
+  transition: color 0.5s var(--ease), border-color 0.5s var(--ease), background 0.5s var(--ease);
+}
+
+/* 区块标题前的小强调条：最轻量、也最能让人觉得"整屏一个色" */
+.block-head h2 {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.block-head h2::before {
+  content: "";
+  width: 2px;
+  height: 9px;
+  border-radius: 2px;
+  background: var(--accent-a);
+  box-shadow: 0 0 8px var(--accent-glow);
+  transition: background 0.5s var(--ease), box-shadow 0.5s var(--ease);
+}
+
+/* 难度分段：选中态跟主题走 */
+.seg button.on {
+  background: linear-gradient(180deg, rgba(var(--accent-rgb), 0.22), rgba(var(--accent-rgb), 0.07));
+  color: var(--text);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+.seg button {
+  transition: background 0.35s var(--ease), color 0.35s var(--ease);
+}
+
+/* 曲目卡：选中时用当前场景色描边，而不是纯白 */
+.song.on {
+  border-color: rgba(var(--accent-rgb), 0.44);
+  background: linear-gradient(180deg, rgba(var(--accent-rgb), 0.10), var(--surface-2) 62%);
+  box-shadow: 0 10px 30px -22px var(--accent-glow);
+}
+.song.on b { color: var(--accent-a); }
+.song { transition: border-color 0.3s var(--ease), background 0.3s var(--ease); }
+
+/* 设置入口 */
+.gear {
+  color: var(--accent-a);
+  border-color: rgba(var(--accent-rgb), 0.22);
+  transition: color 0.5s var(--ease), border-color 0.5s var(--ease), background 0.3s var(--ease);
+}
+.gear:active { box-shadow: 0 0 18px -4px var(--accent-glow); }
+
+/* HUD 的标签行也给一点主题味，数字仍然留白保证可读 */
+.hud-score span { color: rgba(var(--accent-rgb), 0.62); }
+
+/* 结算页副标题 */
+.grade-sub { color: rgba(var(--accent-rgb), 0.78); }
