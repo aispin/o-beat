@@ -488,7 +488,7 @@ function computeLayout() {
     // 小节格子的三围：高固定，块全部按比例塞进格子里
     L.barDur = (60 / S.song.bpm) * S.song.meter;
     L.barH = L.barDur * speed;
-    L.barGap = 20;
+    L.barGap = 4;
     L.pad = null;
     L.mel = null;
   } else if (S.mode === 'drummer') {
@@ -509,7 +509,9 @@ function computeLayout() {
 function noteGeom(n) {
   const L = S.layout;
   if (n.track === 'rhythm') {
-    return { cx: L.lane.x + L.lane.w / 2, w: L.lane.w - 40 };
+    // 左右各留 30px 槽边：块比格子窄一圈，格子轮廓才看得出来；
+    // 右侧槽边同时是小节号的位置，数字不会压在块上。
+    return { cx: L.lane.x + L.lane.w / 2, w: L.lane.w - 60 };
   }
   if (n.track === 'drum') {
     return { cx: L.laneW * (n.col + 0.5), w: Math.min(L.laneW - 12, 52) };
@@ -680,9 +682,9 @@ function drawRhythmBar(b, y0, h, t) {
   // 暗槽：格子底比卷帘底更深，块就成了"浮在槽里的亮条"，
   // 比给格子加亮边更容易读出容器边界。
   c.fillStyle = live ? 'rgba(2,3,7,0.50)' : 'rgba(2,3,7,0.34)';
-  roundRect(c, x + 3, y0, w - 6, h, 14);
+  roundRect(c, x + 3, y0, w - 6, h, 9);
   c.fill();
-  c.strokeStyle = live ? 'rgba(255,255,255,0.26)' : 'rgba(255,255,255,0.13)';
+  c.strokeStyle = live ? 'rgba(255,255,255,0.34)' : 'rgba(255,255,255,0.21)';
   c.lineWidth = 1;
   c.stroke();
 
@@ -697,15 +699,54 @@ function drawRhythmBar(b, y0, h, t) {
     c.lineTo(x + 16, yy);
     c.stroke();
   }
+  c.restore();
+}
 
-  // 小节号写在卡片之间的缝里 —— 块几乎填满卡片，写在里面必被盖住；
-  // 写在缝里反而正好落在小节分界上，像乐谱上的小节号。
-  if (b > 0) {
-    c.fillStyle = live ? ta(0.60) : 'rgba(255,255,255,0.24)';
-    c.font = '700 9px -apple-system, sans-serif';
-    c.textAlign = 'left';
-    c.textBaseline = 'bottom';
-    c.fillText(String(b + 1), x + 12, y0 - 5);
+/* 小节线 + 小节号，最后绘制。
+   缝隙只有 4px，光靠留白分不出小节，所以每个分界补一条贯穿轨道的小节线；
+   块几乎占满格子，小节点必须先画就可能被盖住，必须走这一遍。 */
+function drawRhythmBarMarks() {
+  const L = S.layout, c = ctx;
+  const t = Math.max(0, elapsed());
+  const barDur = L.barDur;
+  const visible = (L.judgeY - L.top) / L.speed;
+  const first = Math.max(0, Math.floor(t / barDur) - 1);
+  const last = Math.min(CFG.bars - 1, Math.ceil((t + visible) / barDur));
+  const x = L.lane.x, w = L.lane.w;
+
+  c.save();
+  c.beginPath();
+  c.rect(x, L.top, w, L.judgeY - L.top);
+  c.clip();
+  c.textAlign = 'right';
+  c.textBaseline = 'top';
+  c.font = '700 9px -apple-system, sans-serif';
+
+  for (let b = first; b <= last; b++) {
+    const bottom = L.judgeY - (b * barDur - t) * L.speed;
+    const y0 = bottom - L.barH + L.barGap / 2;
+    const h = L.barH - L.barGap;
+    if (bottom < L.top - 4 || y0 > L.judgeY + 4 || h < 24) continue;
+    const live = t >= b * barDur && t < (b + 1) * barDur;
+
+    // 小节线：落在两格之间那道 4px 缝的正中，不通到格子里，
+    // 这样它是"分界"而不是"把块切断"。必须够亮 —— 缝隙只有 4px，
+    // 一条 0.2 alpha 的细线在暗底上等于没画。
+    if (b > 0) {
+      const sepY = bottom - L.barH;
+      if (sepY > L.top + 1) {
+        c.strokeStyle = live ? ta(0.62) : 'rgba(255,255,255,0.34)';
+        c.lineWidth = 1.5;
+        c.beginPath();
+        c.moveTo(x + 3, sepY + 0.5);
+        c.lineTo(x + w - 3, sepY + 0.5);
+        c.stroke();
+      }
+    }
+
+    // 小节号：格子内部右上角，落在块的右侧槽边里，不压块
+    c.fillStyle = live ? ta(0.92) : 'rgba(255,255,255,0.46)';
+    c.fillText(String(b + 1), x + w - 10, y0 + 6);
   }
   c.restore();
 }
@@ -1148,7 +1189,10 @@ function draw() {
   drawLanes();
   drawHitZone();
   drawNotes(t);
-  if (S.mode === 'rhythm') drawRhythmFade();
+  if (S.mode === 'rhythm') {
+    drawRhythmFade();
+    drawRhythmBarMarks();
+  }
   drawJudgeLine();
 
   const now = AudioEng.now();

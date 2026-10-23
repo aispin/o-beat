@@ -97,15 +97,16 @@
       };
 
       if (mode === 'rhythm') {
-        // 练习模式：节拍器优先，鼓组只做轻微衬底
+        // 练习模式：节拍器优先，鼓组只做轻微衬底。
+        // 鼓组跟随场景（g.kit），换歌就换练习的"鼓房"，而不是全场一套 acoustic。
         for (let bar = 0; bar < bars; bar++) {
           for (let b = 0; b < meter; b++) {
             push(bar, b, (t, a) => S.click(t, a), b === 0);
             if (meter === 4 && (b === 1 || b === 3)) {
-              push(bar, b, (t) => S.drum('snare', t, { gain: 0.13, kit: 'acoustic' }));
+              push(bar, b, (t, k) => S.drum('snare', t, { gain: 0.13, kit: k }), g.kit);
             }
           }
-          push(bar, 0, (t) => S.drum('kick', t, { gain: 0.32, kit: 'acoustic', duck: 0.1 }));
+          push(bar, 0, (t, k) => S.drum('kick', t, { gain: 0.32, kit: k, duck: 0.1 }), g.kit);
         }
       } else {
         for (let bar = 0; bar < bars; bar++) {
