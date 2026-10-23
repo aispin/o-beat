@@ -172,9 +172,9 @@ const DIFF_NOTE = {
     strict: '音名隐藏，只能靠听',
   },
   rhythm: {
-    casual: '全音符 / 二分 / 四分，先建立时值感',
-    normal: '加入八分音符、附点与休止',
-    strict: '三连音、延音线、十六分',
+    casual: '全音符 / 二分 / 四分 · 只判落点',
+    normal: '加八分、附点与休止 · 只判落点',
+    strict: '三连音与延音线 · 长音符要按满',
   },
 };
 
@@ -331,6 +331,19 @@ function buildChart() {
    ============================================================ */
 const DUR_LABEL = { 4: '全', 3: '附点二分', 2: '二分', 1.5: '附点四分', 1: '四分', 0.75: '附点八分', 0.5: '八分', 0.25: '十六分' };
 
+/* 一屏装下多少个小节。2.15 ≈ 看到两个完整格子 + 第三个刚冒头，
+   让"上一小节 / 这一小节 / 下一小节"能同时入眼，小节感才立得住。 */
+const BAR_LOOK = 2.15;
+
+/* 松手时值判定：只有挑战档才判"有没有按满"。
+   入门/熟练只判落点 —— 时值本身已经靠"块的长度"在教，再叠加手部计时
+   会把练习变成罚站。 */
+const HOLD_JUDGE = { casual: false, normal: false, strict: true };
+function holdJudge() { return !!HOLD_JUDGE[S.diff]; }
+
+/* 时值块之间留的缝。太小就糊成一条色带，小节里"有几个音"看不出来。 */
+const NOTE_GAP = 6;
+
 function buildRhythmChart() {
   const song = S.song;
   const beat = 60 / song.bpm;
@@ -454,11 +467,12 @@ function buildRhythmChart() {
 function computeLayout() {
   const W = view.w, H = view.h;
   const judgeY = H * CFG.layout.judge;
-  // 节奏模式按小节定速：整小节长音符要能装进上半屏，否则时值看不出来
+  // 节奏模式按小节定速：一屏正好看到约 2 个小节格子
+  // 每一小节是一个等高容器，格子数固定才能建立"小节"这个单位
   let speed;
   if (S.mode === 'rhythm') {
     const barDur = (60 / S.song.bpm) * S.song.meter;
-    const look = barDur * 1.35 + 0.6;
+    const look = barDur * BAR_LOOK + 0.6;
     speed = (judgeY - CFG.layout.spawn) / look;
   } else {
     speed = (judgeY - CFG.layout.spawn) / settings.lookahead;
@@ -471,6 +485,10 @@ function computeLayout() {
     L.laneW = w;
     // 卷帘顶界：避开顶部 HUD（分数 / 暂停），长音符从这里"浮出"而不是盖住分数
     L.top = Math.round(Math.min(96, H * 0.14));
+    // 小节格子的三围：高固定，块全部按比例塞进格子里
+    L.barDur = (60 / S.song.bpm) * S.song.meter;
+    L.barH = L.barDur * speed;
+    L.barGap = 20;
     L.pad = null;
     L.mel = null;
   } else if (S.mode === 'drummer') {
@@ -491,7 +509,7 @@ function computeLayout() {
 function noteGeom(n) {
   const L = S.layout;
   if (n.track === 'rhythm') {
-    return { cx: L.lane.x + L.lane.w / 2, w: L.lane.w - 12 };
+    return { cx: L.lane.x + L.lane.w / 2, w: L.lane.w - 40 };
   }
   if (n.track === 'drum') {
     return { cx: L.laneW * (n.col + 0.5), w: Math.min(L.laneW - 12, 52) };
@@ -608,6 +626,12 @@ function hexA(hex, a) {
 
 /* ---------------- 纯节奏模式：时值带 ---------------- */
 
+/* 卷帘底 + 小节格子
+   ------------------------------------------------------------
+   每个小节都是一个高度完全相同的容器 —— 这是"小节"这个单位能被
+   感知到的唯一办法。格子里再按时值切成长短不一的块，于是
+   「一小节里塞了几个音」和「每个音多长」能同时读出来。
+   没有格子的连续色带，看起来永远是一条会动的胶带，没有节。 */
 function drawRhythmLane() {
   const L = S.layout, c = ctx;
   const x = L.lane.x, w = L.lane.w;
@@ -627,22 +651,63 @@ function drawRhythmLane() {
   c.beginPath(); c.moveTo(x + w - 0.5, top); c.lineTo(x + w - 0.5, L.judgeY); c.stroke();
 
   const t = Math.max(0, elapsed());
-  const barDur = (60 / S.song.bpm) * S.song.meter;
+  const barDur = L.barDur;
+  const visible = (L.judgeY - top) / L.speed;
   const first = Math.max(0, Math.floor(t / barDur) - 1);
-  const last = Math.ceil((t + settings.lookahead + 1.4) / barDur);
+  const last = Math.min(CFG.bars - 1, Math.ceil((t + visible) / barDur));
 
   for (let b = first; b <= last; b++) {
-    const y = L.judgeY - (b * barDur - t) * L.speed;
-    if (y < top || y > L.judgeY + 1) continue;
-    c.strokeStyle = 'rgba(255,255,255,0.10)';
-    c.beginPath(); c.moveTo(x, y); c.lineTo(x + w, y); c.stroke();
+    const bottom = L.judgeY - (b * barDur - t) * L.speed;
+    const y0 = bottom - L.barH + L.barGap / 2;
+    const h = L.barH - L.barGap;
+    if (bottom < top - 4 || y0 > L.judgeY + 4) continue;
+    drawRhythmBar(b, y0, h, t);
+  }
+}
 
-    c.fillStyle = 'rgba(255,255,255,0.20)';
-    c.font = '600 9px -apple-system, sans-serif';
+/* 单个小节格子：底、描边、拍刻度、小节号 */
+function drawRhythmBar(b, y0, h, t) {
+  const L = S.layout, c = ctx;
+  const x = L.lane.x, w = L.lane.w;
+  const beatN = S.song.meter;
+  const live = t >= b * L.barDur && t < (b + 1) * L.barDur;
+
+  c.save();
+  c.beginPath();
+  c.rect(x, L.top, w, L.judgeY - L.top);
+  c.clip();
+
+  // 暗槽：格子底比卷帘底更深，块就成了"浮在槽里的亮条"，
+  // 比给格子加亮边更容易读出容器边界。
+  c.fillStyle = live ? 'rgba(2,3,7,0.50)' : 'rgba(2,3,7,0.34)';
+  roundRect(c, x + 3, y0, w - 6, h, 14);
+  c.fill();
+  c.strokeStyle = live ? 'rgba(255,255,255,0.26)' : 'rgba(255,255,255,0.13)';
+  c.lineWidth = 1;
+  c.stroke();
+
+  // 拍刻度：格子左缘的一排小横线，数得出这一小节有几拍
+  for (let k = 0; k <= beatN; k++) {
+    const yy = y0 + h - (h / beatN) * k;
+    if (yy < y0 + 3 || yy > y0 + h - 3) continue;
+    c.strokeStyle = (k === 0 || k === beatN)
+      ? 'rgba(255,255,255,0.24)' : 'rgba(255,255,255,0.14)';
+    c.beginPath();
+    c.moveTo(x + 5, yy);
+    c.lineTo(x + 16, yy);
+    c.stroke();
+  }
+
+  // 小节号写在卡片之间的缝里 —— 块几乎填满卡片，写在里面必被盖住；
+  // 写在缝里反而正好落在小节分界上，像乐谱上的小节号。
+  if (b > 0) {
+    c.fillStyle = live ? ta(0.60) : 'rgba(255,255,255,0.24)';
+    c.font = '700 9px -apple-system, sans-serif';
     c.textAlign = 'left';
     c.textBaseline = 'bottom';
-    c.fillText(String(b + 1), x + 5, y - 3);
+    c.fillText(String(b + 1), x + 12, y0 - 5);
   }
+  c.restore();
 }
 
 /* 卷帘顶部的渐隐：长音符从暗处浮出，而不是被生硬切断 */
@@ -690,31 +755,31 @@ function drawRhythmPad() {
   const cy = pad.y + pad.h / 2;
 
   // 中心圆：按下时扩散
-  const r = 22 + press * 10;
+  const r = 20 + press * 8;
   c.beginPath();
   c.arc(cx, cy, r, 0, Math.PI * 2);
-  c.fillStyle = rest ? 'rgba(140,148,166,0.10)' : ta(0.07 + press * 0.20);
+  c.fillStyle = rest ? 'rgba(140,148,166,0.10)' : ta(0.09 + press * 0.20);
   c.fill();
-  c.strokeStyle = rest ? 'rgba(140,148,166,0.24)' : ta(0.28 + press * 0.4);
-  c.lineWidth = 1;
+  c.strokeStyle = rest ? 'rgba(140,148,166,0.30)' : ta(0.36 + press * 0.4);
+  c.lineWidth = 1.2;
   c.stroke();
 
   c.textAlign = 'center';
   c.textBaseline = 'middle';
   if (rest) {
-    c.fillStyle = 'rgba(180,188,204,0.66)';
+    c.fillStyle = 'rgba(196,204,220,0.82)';
     c.font = '600 13px -apple-system, sans-serif';
     c.fillText('休 止', cx, cy);
-    c.fillStyle = 'rgba(180,188,204,0.34)';
+    c.fillStyle = 'rgba(196,204,220,0.44)';
     c.font = '500 10px -apple-system, sans-serif';
-    c.fillText('这一段别敲', cx, cy + 20);
+    c.fillText('这一段别敲', cx, cy + 32);
   } else {
-    c.fillStyle = ta(0.5 + press * 0.45);
+    c.fillStyle = ta(0.78 + press * 0.22);
     c.font = '600 13px -apple-system, sans-serif';
     c.fillText('敲 击', cx, cy);
-    c.fillStyle = ta(0.30);
+    c.fillStyle = ta(0.44 + press * 0.3);
     c.font = '500 10px -apple-system, sans-serif';
-    c.fillText('长音符按住不放', cx, cy + 20);
+    c.fillText(holdJudge() ? '长音符按住到尾巴' : '跟着拍子敲下去', cx, cy + 32);
   }
   c.restore();
 }
@@ -722,12 +787,21 @@ function drawRhythmPad() {
 function drawRhythmNote(n, t) {
   const L = S.layout, c = ctx;
   const g = noteGeom(n);
-  const yOnset = L.judgeY - (n.time - t) * L.speed;
-  const hFull = Math.max(10, n.dur * L.speed);
-  const h = Math.min(hFull, L.H * 1.6);
-  const top = yOnset - h;
-  const bottom = yOnset;
+  const barDur = L.barDur;
+  const bar = Math.floor(n.time / barDur + 1e-6);
+  const barBottom = L.judgeY - (bar * barDur - t) * L.speed;
+  // 块不完全按 dur×speed 算，而是按"在这一小节里占几成"换算 ——
+  // 这样无论小节多长，块都严格落在格子内，全音符正好填满一格。
+  const p0 = clamp((n.time - bar * barDur) / barDur, 0, 1);
+  const p1 = clamp((n.time + n.dur - bar * barDur) / barDur, 0, 1);
+  const inner = L.barH - L.barGap;
+  const yOf = (p) => barBottom - L.barGap / 2 - p * inner;
+
+  const bottom = yOf(p0);
+  const top = yOf(p1) + NOTE_GAP;   // 相邻两块之间永远有一条缝
+  const h = Math.max(7, bottom - top);
   if (bottom < L.top - 30 || top > L.H + 30) return;
+  if (h < 2) return;
 
   const x = g.cx - g.w / 2, w = g.w;
   const beat = 60 / S.song.bpm;
@@ -783,9 +857,9 @@ function drawRhythmNote(n, t) {
   c.globalAlpha = missed ? 0.24 : 1;
 
   const grad = c.createLinearGradient(0, top, 0, bottom);
-  grad.addColorStop(0, hexA(color, 0.05));
-  grad.addColorStop(0.55, hexA(color, holding ? 0.34 : 0.14));
-  grad.addColorStop(1, hexA(color, holding ? 0.55 : 0.26));
+  grad.addColorStop(0, hexA(color, 0.10));
+  grad.addColorStop(0.55, hexA(color, holding ? 0.36 : 0.17));
+  grad.addColorStop(1, hexA(color, holding ? 0.58 : 0.30));
 
   // 先铺一层深底：任何场景下都要能读清
   c.fillStyle = missed ? 'rgba(26,30,38,0.6)' : 'rgba(9,12,18,0.66)';
@@ -799,12 +873,12 @@ function drawRhythmNote(n, t) {
   c.lineWidth = 1.4;
   c.stroke();
 
-  // 内部拍线：几拍一眼看出
+  // 内部拍线：几拍一眼看出（按格子的比例走，和块边界对齐）
   if (n.dur > beat * 1.15) {
     c.strokeStyle = hexA(color, 0.20);
     c.lineWidth = 1;
     for (let k = 1; k * beat < n.dur - 1e-6; k++) {
-      const yy = bottom - k * beat * L.speed;
+      const yy = bottom - (k * beat / barDur) * inner;
       if (yy > top + 3 && yy < bottom - 8) {
         c.beginPath();
         c.moveTo(x + 7, yy);
@@ -1208,15 +1282,22 @@ function judgeRhythm(t, pid) {
     S.press.rhythm = 1;
     playTimbre(AudioEng.now(), 1);
 
+    const full = holdJudge();
+
     if (best.type === 'hold') {
       best.status = 'holding';
       best.grade = grade;
       best.heldFrom = t;
       best.pid = pid;
       S.holds.set('rhythm', best);
-      // 起音先给 60%，松手结算剩下的 40%
       const g = geom(best);
-      addScore(CFG.score[grade] * 0.6, g.x, g.y, grade);
+      if (full) {
+        // 挑战档：起音先给 60%，松手结算剩下的 40%
+        addScore(CFG.score[grade] * 0.6, g.x, g.y, grade);
+      } else {
+        // 入门/熟练：只判落点，一次给满。长音符仍会亮起，只是不追究按多久
+        addScore(CFG.score[grade], g.x, g.y, grade);
+      }
     } else {
       best.status = 'done';
       const g = geom(best);
@@ -1249,11 +1330,12 @@ function endRhythmHold(t) {
   const n = S.holds.get('rhythm');
   if (!n) return;
   S.holds.delete('rhythm');
+  n.status = 'done';
+  if (!holdJudge()) return;   // 只判落点的档位：松手即结束，不追究按了多久
 
   const end = n.time + n.dur;
   const ratio = clamp((t - n.time) / n.dur, 0, 1);
   const ok = t >= end - 0.14;
-  n.status = 'done';
   n.heldRatio = ratio;
 
   S.holdSum += ok ? 1 : ratio;
@@ -1628,7 +1710,10 @@ function endRun() {
     ['完整度', full * 100, full * 100],
   ];
   if (S.mode === 'rhythm') {
-    rows[2] = ['时值', timeval, timeval];
+    // 只有挑战档收长音符的松手判定，才有「时值」这个维度可算
+    rows[2] = holdJudge()
+      ? ['时值', timeval, timeval]
+      : ['完整度', full * 100, full * 100];
   }
   renderMetrics(rows);
   renderHisto();
@@ -1641,7 +1726,10 @@ function endRun() {
   if (S.mode === 'rhythm') {
     if (S.restHits > 0) diag += ' 休止里抢了 ' + S.restHits + ' 次，灰色段要留白。';
     if (S.stats.short > 0) diag += ' 有 ' + S.stats.short + ' 个长音符没按满。';
-    if (S.restHits === 0 && S.stats.short === 0) diag += ' 时值很干净：该停的地方停了，该拖的地方拖满了。';
+    if (S.restHits === 0 && S.stats.short === 0 && holdJudge()) {
+      diag += ' 时值很干净：该停的地方停了，该拖的地方拖满了。';
+    }
+    if (!holdJudge()) diag += ' 这一档只判落点，去挑战档再练按满。';
   }
   $('#diag').textContent = diag;
 
@@ -1869,3 +1957,17 @@ $('#pauseModal').classList.add('hide');
 renderTimbres();
 updateModeChrome();
 requestAnimationFrame(loop);
+
+/* 调试出口：只在 URL 带 debug 时挂到 window，生产环境不留痕。
+   用来在自动化里读真实布局与谱面，不靠截图猜数值。 */
+if (location.search.indexOf('debug') >= 0) {
+  window.__OMB = {
+    get S() { return S; },
+    get settings() { return settings; },
+    holdJudge,
+    elapsed,
+    judgeRhythm,
+    endRhythmHold,
+    endRun,
+  };
+}
