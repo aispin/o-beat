@@ -46,6 +46,22 @@ const NOTE_SEMI = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
 const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 const PENTA = { maj: [0, 2, 4, 7, 9], min: [0, 3, 5, 7, 10] };
 
+/* 场景 → 主奏音色 / 鼓组 */
+const SCENE_INST = { cyber: 'lead', classic: 'piano', lofi: 'rhodes', rock: 'guitar' };
+const SCENE_KIT = { cyber: 'techno', classic: 'acoustic', lofi: 'kpr77', rock: 'acoustic' };
+
+/* 纯节奏模式的搞怪音色 */
+const TIMBRES = [
+  { id: 'wood',  name: '木鱼', ico: '<circle cx="8" cy="8.4" r="5.2"/><path d="M8 2.2v1.9"/>' },
+  { id: 'bubble', name: '泡泡', ico: '<circle cx="7" cy="9" r="4.4"/><circle cx="12.6" cy="4.4" r="1.5"/>' },
+  { id: 'boing', name: '弹簧', ico: '<path d="M3 12.4c1.6-5.4 3.4 2.4 5-2.4s3.2 2.4 4.6-1.6"/>' },
+  { id: 'meow',  name: '喵喵', ico: '<path d="M4 12.6V5.4l2.6 2h2.8l2.6-2v7.2z"/><path d="M6.6 9.6h.01M9.4 9.6h.01"/>' },
+  { id: 'duck',  name: '嘎嘎', ico: '<circle cx="5.8" cy="7" r="3"/><path d="M8.8 7H13l-1.4 2.4H8.8z"/><path d="M3.4 12.6h7"/>' },
+  { id: 'type',  name: '打字机', ico: '<rect x="2.6" y="7.6" width="10.8" height="5.6" rx="1.2"/><path d="M5.4 7.6V4.4h5.2v3.2"/><path d="M4.6 10.8h6.8"/>' },
+  { id: 'laser', name: '激光', ico: '<path d="M9.2 2.2L5 9h3l-1.2 4.8L11.6 7H8.6z"/>' },
+  { id: 'clap',  name: '拍手', ico: '<path d="M5.4 3.4v6.4M8 2.4v7.4M10.6 3.4v6.4"/><path d="M3.8 12.4h8.4"/>' },
+];
+
 /* ---------------- 工具 ---------------- */
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => Array.prototype.slice.call(document.querySelectorAll(s));
@@ -100,9 +116,15 @@ const S = {
   combo: 0,
   maxCombo: 0,
   earned: 0,
-  stats: { perfect: 0, great: 0, good: 0, miss: 0, pitch: 0 },
+  stats: { perfect: 0, great: 0, good: 0, miss: 0, pitch: 0, short: 0 },
   devs: [],
   holds: new Map(),
+  rests: [],
+  restHits: 0,
+  holdSum: 0,
+  holdCount: 0,
+  timbreStep: 0,
+  rhythmRest: null,
   fx: [],
   floats: [],
   press: {},
@@ -122,239 +144,88 @@ const settings = Object.assign({
   pitchJudge: true,
   sound: true,
   sceneOn: true,
+  timbre: 'wood',
 }, JSON.parse(localStorage.getItem('omb.settings') || '{}'));
+
+const DIFF_NOTE = {
+  drummer: {
+    casual: '只有正拍，四分音符为主',
+    normal: '正反拍都有，判定标准',
+    strict: '加花与切分，判定严格',
+  },
+  melodist: {
+    casual: '音符稀疏，音名全显',
+    normal: '正反拍都有，五声内循环',
+    strict: '音名隐藏，只能靠听',
+  },
+  rhythm: {
+    casual: '全音符 / 二分 / 四分，先建立时值感',
+    normal: '加入八分音符、附点与休止',
+    strict: '三连音、延音线、十六分',
+  },
+};
 
 function saveSettings() {
   try { localStorage.setItem('omb.settings', JSON.stringify(settings)); } catch (e) {}
 }
 
 /* ============================================================
-   音频引擎（原型阶段实时合成；小程序阶段换预渲染 + 采样）
+   音频适配层
+   发声在 sfx.js（采样 + 物理建模 + 混响），编曲在 backing.js
    ============================================================ */
 const AudioEng = {
-  ctx: null,
-  master: null,
-  busHit: null,
-  busMusic: null,
-  noiseBuf: null,
-  ready: false,
+  get ctx() { return window.SFX ? SFX.ctx : null; },
 
   init() {
-    if (this.ctx) {
-      if (this.ctx.state === 'suspended') this.ctx.resume();
-      return;
+    if (!window.SFX || !SFX.init()) return false;
+    const space = S.mode === 'rhythm' ? 'practice' : S.song.scene;
+    SFX.setSpace(space);
+    SFX.setKit(SCENE_KIT[S.song.scene] || 'acoustic');
+    SFX.setMute(!settings.sound);
+    SFX.ensure();
+    return true;
+  },
+
+  now() { return window.SFX ? SFX.now() : performance.now() / 1000; },
+  setMute(m) { if (window.SFX) SFX.setMute(m); },
+  click(t, accent) { if (window.SFX) SFX.click(t, accent); },
+
+  /* 击打音：按模式分发 */
+  playHit(note) {
+    if (!window.SFX || !settings.sound) return null;
+    const t = this.now();
+
+    if (S.mode === 'rhythm') { playTimbre(t, 1); return null; }
+
+    if (note.track === 'drum') {
+      const names = ['kick', 'snare', 'hat', 'openhat'];
+      SFX.drum(names[note.col] || 'kick', t, { gain: note.col === 0 ? 1 : 0.82 });
+      return null;
     }
-    const AC = window.AudioContext || window.webkitAudioContext;
-    if (!AC) return;
-    this.ctx = new AC();
-
-    const comp = this.ctx.createDynamicsCompressor();
-    comp.threshold.value = -14;
-    comp.knee.value = 24;
-    comp.ratio.value = 4;
-    comp.attack.value = 0.004;
-    comp.release.value = 0.18;
-    comp.connect(this.ctx.destination);
-
-    this.master = this.ctx.createGain();
-    this.master.gain.value = settings.sound ? 0.9 : 0;
-    this.master.connect(comp);
-
-    this.busHit = this.ctx.createGain();
-    this.busHit.gain.value = 0.95;
-    this.busHit.connect(this.master);
-
-    this.busMusic = this.ctx.createGain();
-    this.busMusic.gain.value = 0.55;
-    this.busMusic.connect(this.master);
-
-    const len = Math.floor(this.ctx.sampleRate * 1.2);
-    const buf = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
-    const d = buf.getChannelData(0);
-    for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
-    this.noiseBuf = buf;
-
-    this.ready = true;
-  },
-
-  now() { return this.ctx ? this.ctx.currentTime : performance.now() / 1000; },
-  setMute(m) { if (this.master) this.master.gain.value = m ? 0 : 0.9; },
-
-  kick(t, v, bus) {
-    const c = this.ctx, o = c.createOscillator(), g = c.createGain();
-    o.type = 'sine';
-    o.frequency.setValueAtTime(148, t);
-    o.frequency.exponentialRampToValueAtTime(46, t + 0.1);
-    g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(1.05 * v, t + 0.006);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.3);
-    o.connect(g); g.connect(bus || this.busHit);
-    o.start(t); o.stop(t + 0.32);
-  },
-
-  snare(t, v, bus) {
-    const c = this.ctx;
-    const s = c.createBufferSource(); s.buffer = this.noiseBuf;
-    const bp = c.createBiquadFilter(); bp.type = 'highpass'; bp.frequency.value = 1400;
-    const g = c.createGain();
-    g.gain.setValueAtTime(0.55 * v, t);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.16);
-    s.connect(bp); bp.connect(g); g.connect(bus || this.busHit);
-    s.start(t); s.stop(t + 0.18);
-
-    const o = c.createOscillator(), og = c.createGain();
-    o.type = 'triangle';
-    o.frequency.setValueAtTime(210, t);
-    o.frequency.exponentialRampToValueAtTime(150, t + 0.06);
-    og.gain.setValueAtTime(0.35 * v, t);
-    og.gain.exponentialRampToValueAtTime(0.0001, t + 0.1);
-    o.connect(og); og.connect(bus || this.busHit);
-    o.start(t); o.stop(t + 0.12);
-  },
-
-  hat(t, v, open, bus) {
-    const c = this.ctx;
-    const s = c.createBufferSource(); s.buffer = this.noiseBuf;
-    const hp = c.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = open ? 6800 : 8800;
-    const g = c.createGain();
-    const dur = open ? 0.26 : 0.045;
-    g.gain.setValueAtTime(0.3 * v, t);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    s.connect(hp); hp.connect(g); g.connect(bus || this.busHit);
-    s.start(t); s.stop(t + dur + 0.02);
-  },
-
-  bass(t, midi, dur, v) {
-    const c = this.ctx;
-    const f = 440 * Math.pow(2, (midi - 69) / 12);
-    const o = c.createOscillator(), g = c.createGain(), lp = c.createBiquadFilter();
-    o.type = 'sawtooth';
-    o.frequency.value = f;
-    lp.type = 'lowpass';
-    lp.frequency.setValueAtTime(560, t);
-    lp.frequency.exponentialRampToValueAtTime(240, t + dur);
-    lp.Q.value = 1.2;
-    g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(0.5 * v, t + 0.02);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    o.connect(lp); lp.connect(g); g.connect(this.busMusic);
-    o.start(t); o.stop(t + dur + 0.05);
-  },
-
-  pad(t, midis, dur, v) {
-    const c = this.ctx;
-    midis.forEach((midi, i) => {
-      const f = 440 * Math.pow(2, (midi - 69) / 12);
-      const o = c.createOscillator(), o2 = c.createOscillator();
-      const g = c.createGain(), lp = c.createBiquadFilter();
-      o.type = 'sawtooth'; o2.type = 'sawtooth';
-      o.frequency.value = f; o2.frequency.value = f * 1.004;
-      lp.type = 'lowpass'; lp.frequency.value = 900; lp.Q.value = 0.7;
-      g.gain.setValueAtTime(0.0001, t);
-      g.gain.linearRampToValueAtTime(0.09 * v / (i + 1), t + 0.35);
-      g.gain.setValueAtTime(0.09 * v / (i + 1), t + Math.max(0.4, dur - 0.35));
-      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-      o.connect(lp); o2.connect(lp); lp.connect(g); g.connect(this.busMusic);
-      o.start(t); o2.start(t);
-      o.stop(t + dur + 0.05); o2.stop(t + dur + 0.05);
+    if (note.track === 'mel') {
+      const inst = SCENE_INST[S.song.scene] || 'piano';
+      const midi = S.song.root + PENTA[S.song.scale][note.col];
+      return SFX.note(inst, midi, t, { dur: 0.66, gain: 1 });
+    }
+    // PAD 长音
+    return SFX.note('pad', [S.song.root - 12, S.song.root - 5, S.song.root - 12 + 7], t, {
+      dur: 1.2, gain: 1,
     });
   },
-
-  tone(t, midi, dur, v) {
-    const c = this.ctx;
-    const f = 440 * Math.pow(2, (midi - 69) / 12);
-    const o = c.createOscillator(), g = c.createGain();
-    const o2 = c.createOscillator(), g2 = c.createGain();
-    o.type = 'triangle'; o2.type = 'sine';
-    o.frequency.value = f; o2.frequency.value = f * 2;
-    g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(0.42 * v, t + 0.008);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    g2.gain.setValueAtTime(0.0001, t);
-    g2.gain.exponentialRampToValueAtTime(0.12 * v, t + 0.008);
-    g2.gain.exponentialRampToValueAtTime(0.0001, t + dur * 0.7);
-    o.connect(g); g.connect(this.busHit);
-    o2.connect(g2); g2.connect(this.busHit);
-    o.start(t); o.stop(t + dur + 0.05);
-    o2.start(t); o2.stop(t + dur + 0.05);
-  },
-
-  click(t, accent) {
-    const c = this.ctx, o = c.createOscillator(), g = c.createGain();
-    o.type = 'square';
-    o.frequency.value = accent ? 2100 : 1560;
-    g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(accent ? 0.13 : 0.08, t + 0.003);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.04);
-    o.connect(g); g.connect(this.busMusic);
-    o.start(t); o.stop(t + 0.05);
-  },
-
-  playHit(note) {
-    if (!this.ready || !settings.sound) return;
-    const t = this.now();
-    if (note.track === 'drum') {
-      if (note.col === 0) this.kick(t, 0.9);
-      else if (note.col === 1) this.snare(t, 0.85);
-      else this.hat(t, 0.55, note.col === 3);
-    } else if (note.track === 'mel') {
-      this.tone(t, S.song.root + PENTA[S.song.scale][note.col], 0.5, 0.9);
-    } else {
-      this.pad(t, [S.song.root - 12, S.song.root - 5], 0.9, 1.2);
-    }
-  },
 };
 
-/* ---------------- 伴奏调度 ---------------- */
-const Backing = {
-  events: [],
-  idx: 0,
-  timer: null,
-  build(song) {
-    const beat = 60 / song.bpm;
-    const barDur = beat * song.meter;
-    const ev = [];
-    for (let bar = 0; bar < CFG.bars; bar++) {
-      const t0 = bar * barDur;
-      const chord = song.chords[bar % song.chords.length];
-      const semis = chordSemis(chord);
-      const rootMidi = 36 + semis[0];
-
-      for (let b = 0; b < song.meter; b++) {
-        ev.push({ at: t0 + b * beat, fn: (t) => AudioEng.hat(t, 0.16, false, AudioEng.busMusic) });
-        if (b === 0 || (song.meter === 4 && b === 2)) {
-          ev.push({ at: t0 + b * beat, fn: (t) => AudioEng.kick(t, 0.55, AudioEng.busMusic) });
-        }
-        if (b === 1 || (song.meter === 4 && b === 3)) {
-          ev.push({ at: t0 + b * beat, fn: (t) => AudioEng.snare(t, 0.3, AudioEng.busMusic) });
-        }
-        if (b === 0) {
-          ev.push({ at: t0, fn: (t) => AudioEng.bass(t, rootMidi, beat * 1.6, 0.9) });
-        }
-        if (song.meter === 4 && b === 2) {
-          ev.push({ at: t0 + 2 * beat, fn: (t) => AudioEng.bass(t, rootMidi + 7, beat * 1.2, 0.6) });
-        }
-      }
-      ev.push({ at: t0, fn: (t) => AudioEng.pad(t, [rootMidi + 12, rootMidi + 12 + 7, rootMidi + 24], barDur * 0.98, 1) });
-    }
-    ev.sort((a, b) => a.at - b.at);
-    this.events = ev;
-    this.idx = 0;
-  },
-  start() {
-    this.stop();
-    this.timer = setInterval(() => {
-      if (!AudioEng.ctx || AudioEng.ctx.state !== 'running') return;
-      const horizon = AudioEng.now() - S.startTime + 0.35;
-      while (this.idx < this.events.length && this.events[this.idx].at < horizon) {
-        const e = this.events[this.idx++];
-        const t = S.startTime + e.at;
-        if (t > AudioEng.now() - 0.05) e.fn(t);
-      }
-    }, 30);
-  },
-  stop() { if (this.timer) { clearInterval(this.timer); this.timer = null; } },
-};
+/* 节奏模式的搞怪音色：按五声音阶轮流换音高，连打会变成一小段旋律 */
+const TIMBRE_LADDER = [0, 2, 4, 7, 9, 12, 9, 7, 4, 2, 0, 4];
+function playTimbre(t, vol) {
+  if (!window.SFX || !settings.sound) return;
+  const semi = TIMBRE_LADDER[S.timbreStep % TIMBRE_LADDER.length];
+  S.timbreStep++;
+  SFX.sfx(settings.timbre || 'wood', t, {
+    gain: vol == null ? 1 : vol,
+    pitch: Math.pow(2, semi / 12),
+    pan: ((S.timbreStep % 3) - 1) * 0.1,
+  });
+}
 
 /* ============================================================
    谱面
@@ -367,6 +238,8 @@ function sectionOf(bar) {
 }
 
 function buildChart() {
+  S.rests = [];
+  if (S.mode === 'rhythm') return buildRhythmChart();
   const song = S.song;
   const beat = 60 / song.bpm;
   const meter = song.meter;
@@ -436,15 +309,158 @@ function buildChart() {
 }
 
 /* ============================================================
+   纯节奏模式谱面
+   ------------------------------------------------------------
+   一条单轨「时值带」：每个块的长度 = 它的时值，灰色块 = 休止。
+   全音符是一整条，两个二分音符是两段，二分 + 四分休止就是
+   一段彩色接一段灰。附点、延音线、三连音都直接体现在长度上。
+   每局随机生成。
+   ============================================================ */
+const DUR_LABEL = { 4: '全', 3: '附点二分', 2: '二分', 1.5: '附点四分', 1: '四分', 0.75: '附点八分', 0.5: '八分', 0.25: '十六分' };
+
+function buildRhythmChart() {
+  const song = S.song;
+  const beat = 60 / song.bpm;
+  const meter = song.meter;
+  const barDur = beat * meter;
+  // 每局都不一样：用时间 + 随机数做种子
+  const seed = ((Date.now() ^ Math.floor(Math.random() * 1e9)) >>> 0) || 7;
+  const rnd = mulberry32(seed);
+
+  const pool = {
+    casual: [3, 2, 1],
+    normal: [3, 2, 1.5, 1, 0.5],
+    strict: [3, 2, 1.5, 1, 0.75, 0.5, 0.25],
+  }[S.diff].filter((d) => d <= meter + 1e-6);
+
+  const weight = { 3: 2.0, 2: 2.6, 1.5: 1.5, 1: 2.8, 0.75: 1.0, 0.5: 1.6, 0.25: 0.55 };
+  const restP = { casual: 0.10, normal: 0.20, strict: 0.24 }[S.diff];
+
+  const notes = [];
+  const rests = [];
+  let id = 0;
+  const push = (n) => { n.id = id++; notes.push(n); };
+
+  for (let bar = 0; bar < CFG.bars; bar++) {
+    const t0 = bar * barDur;
+    const slots = [];
+
+    if (bar === CFG.bars - 1) {
+      // 收束：一个长音落到底，不留半拍悬空
+      const long = meter === 4 ? 4 : 3;
+      slots.push({ d: long, rest: false });
+      if (meter - long > 0.01) slots.push({ d: meter - long, rest: true });
+    } else {
+      let budget = meter;
+      let guard = 0;
+      let prev = 0;
+      while (budget > 1e-6 && guard++ < 32) {
+        const cands = pool.filter((d) => d <= budget + 1e-6);
+        if (!cands.length) break;
+        let total = 0;
+        const ws = cands.map((d) => {
+          const w = (weight[d] || 1) * (d === prev ? 0.3 : 1);
+          total += w;
+          return w;
+        });
+        let r = rnd() * total, d = cands[cands.length - 1];
+        for (let i = 0; i < cands.length; i++) { r -= ws[i]; if (r <= 0) { d = cands[i]; break; } }
+        slots.push({ d, rest: false });
+        budget -= d;
+        prev = d;
+      }
+
+      // 休止符：保住小节第一拍，不连续两个
+      let run = 0;
+      slots.forEach((s, i) => {
+        if (i === 0 && rnd() < 0.7) return;
+        s.rest = rnd() < restP;
+        if (s.rest) { if (++run >= 2) s.rest = false; } else run = 0;
+      });
+      if (slots.every((s) => s.rest)) slots[0].rest = false;
+
+      // 连音线：把相邻两个实音接成一个长音，打一次按住到底
+      if (S.diff !== 'casual' && rnd() < 0.5) {
+        for (let i = 0; i < slots.length - 1; i++) {
+          if (!slots[i].rest && !slots[i + 1].rest && rnd() < 0.35) {
+            slots[i].d += slots[i + 1].d;
+            slots[i].tie = true;
+            slots.splice(i + 1, 1);
+          }
+        }
+      }
+
+      // 三连音：两个 1 拍换成 3 个 2/3 拍
+      if (S.diff === 'strict' && rnd() < 0.36) {
+        for (let i = 0; i < slots.length - 1; i++) {
+          if (!slots[i].rest && !slots[i + 1].rest &&
+              Math.abs(slots[i].d - 1) < 1e-6 && Math.abs(slots[i + 1].d - 1) < 1e-6) {
+            const g = id + 1000 + bar;
+            slots.splice(i, 2,
+              { d: 2 / 3, rest: false, trip: g },
+              { d: 2 / 3, rest: false, trip: g },
+              { d: 2 / 3, rest: false, trip: g });
+            break;
+          }
+        }
+      }
+    }
+
+    let pos = 0;
+    slots.forEach((s) => {
+      const time = t0 + pos * beat;
+      const dur = s.d * beat;
+      if (s.rest) {
+        const r = { track: 'rhythm', col: 0, time, dur, type: 'rest', beats: s.d, status: 'rest' };
+        push(r);
+        rests.push(r);
+      } else {
+        push({
+          track: 'rhythm', col: 0, time, dur,
+          type: s.d >= 1 - 1e-6 ? 'hold' : 'tap',
+          beats: s.d,
+          dotted: [3, 1.5, 0.75].some((x) => Math.abs(x - s.d) < 1e-6),
+          tie: !!s.tie,
+          trip: s.trip == null ? null : s.trip,
+          status: 'pending', grade: null,
+        });
+      }
+      pos += s.d;
+    });
+  }
+
+  notes.sort((a, b) => a.time - b.time);
+  S.rests = rests;
+  S.totalDur = CFG.bars * barDur;
+  return notes;
+}
+
+/* ============================================================
    布局
    ============================================================ */
 function computeLayout() {
   const W = view.w, H = view.h;
   const judgeY = H * CFG.layout.judge;
-  const speed = (judgeY - CFG.layout.spawn) / settings.lookahead;
+  // 节奏模式按小节定速：整小节长音符要能装进上半屏，否则时值看不出来
+  let speed;
+  if (S.mode === 'rhythm') {
+    const barDur = (60 / S.song.bpm) * S.song.meter;
+    const look = barDur * 1.35 + 0.6;
+    speed = (judgeY - CFG.layout.spawn) / look;
+  } else {
+    speed = (judgeY - CFG.layout.spawn) / settings.lookahead;
+  }
   const L = { W, H, judgeY, speed };
 
-  if (S.mode === 'drummer') {
+  if (S.mode === 'rhythm') {
+    const w = Math.min(W - 32, 430);
+    L.lane = { x: (W - w) / 2, w };
+    L.laneW = w;
+    // 卷帘顶界：避开顶部 HUD（分数 / 暂停），长音符从这里"浮出"而不是盖住分数
+    L.top = Math.round(Math.min(96, H * 0.14));
+    L.pad = null;
+    L.mel = null;
+  } else if (S.mode === 'drummer') {
     L.laneW = W / 4;
     L.pad = null;
     L.mel = null;
@@ -461,6 +477,9 @@ function computeLayout() {
 
 function noteGeom(n) {
   const L = S.layout;
+  if (n.track === 'rhythm') {
+    return { cx: L.lane.x + L.lane.w / 2, w: L.lane.w - 12 };
+  }
   if (n.track === 'drum') {
     return { cx: L.laneW * (n.col + 0.5), w: Math.min(L.laneW - 12, 52) };
   }
@@ -471,6 +490,7 @@ function noteGeom(n) {
 }
 
 function noteColor(n) {
+  if (n.track === 'rhythm') return n.type === 'rest' ? '#8C94A6' : MEL_COLOR;
   if (n.track === 'drum') return DRUM_COLOR[n.col];
   if (n.track === 'pad') return PAD_COLOR;
   return MEL_COLOR;
@@ -497,6 +517,11 @@ function drawLanes() {
   const L = S.layout, c = ctx, H = L.H;
 
   c.save();
+  if (S.mode === 'rhythm') {
+    drawRhythmLane();
+    c.restore();
+    return;
+  }
   if (L.mel) {
     if (L.pad) {
       const pg = c.createLinearGradient(0, 0, L.pad.w, 0);
@@ -563,8 +588,289 @@ function drawLanes() {
   c.restore();
 }
 
+function hexA(hex, a) {
+  const n = parseInt(hex.slice(1), 16);
+  return 'rgba(' + ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ',' + a + ')';
+}
+
+/* ---------------- 纯节奏模式：时值带 ---------------- */
+
+function drawRhythmLane() {
+  const L = S.layout, c = ctx;
+  const x = L.lane.x, w = L.lane.w;
+  const top = L.top;
+
+  // 压暗的卷帘底：保证块与灰段都能看清
+  const g = c.createLinearGradient(0, top, 0, L.judgeY);
+  g.addColorStop(0, 'rgba(8,10,16,0.42)');
+  g.addColorStop(0.75, 'rgba(8,10,16,0.58)');
+  g.addColorStop(1, 'rgba(8,10,16,0.72)');
+  c.fillStyle = g;
+  c.fillRect(x, top, w, L.judgeY - top);
+
+  c.strokeStyle = 'rgba(255,255,255,0.10)';
+  c.lineWidth = 1;
+  c.beginPath(); c.moveTo(x + 0.5, top); c.lineTo(x + 0.5, L.judgeY); c.stroke();
+  c.beginPath(); c.moveTo(x + w - 0.5, top); c.lineTo(x + w - 0.5, L.judgeY); c.stroke();
+
+  const t = Math.max(0, elapsed());
+  const barDur = (60 / S.song.bpm) * S.song.meter;
+  const first = Math.max(0, Math.floor(t / barDur) - 1);
+  const last = Math.ceil((t + settings.lookahead + 1.4) / barDur);
+
+  for (let b = first; b <= last; b++) {
+    const y = L.judgeY - (b * barDur - t) * L.speed;
+    if (y < top || y > L.judgeY + 1) continue;
+    c.strokeStyle = 'rgba(255,255,255,0.10)';
+    c.beginPath(); c.moveTo(x, y); c.lineTo(x + w, y); c.stroke();
+
+    c.fillStyle = 'rgba(255,255,255,0.20)';
+    c.font = '600 9px -apple-system, sans-serif';
+    c.textAlign = 'left';
+    c.textBaseline = 'bottom';
+    c.fillText(String(b + 1), x + 5, y - 3);
+  }
+}
+
+/* 卷帘顶部的渐隐：长音符从暗处浮出，而不是被生硬切断 */
+function drawRhythmFade() {
+  const L = S.layout, c = ctx;
+  const top = L.top, h = 54;
+  const g = c.createLinearGradient(0, top, 0, top + h);
+  g.addColorStop(0, 'rgba(8,10,16,0.86)');
+  g.addColorStop(1, 'rgba(8,10,16,0)');
+  c.save();
+  c.beginPath();
+  c.rect(L.lane.x, top, L.lane.w, h);
+  c.clip();
+  c.fillStyle = g;
+  c.fillRect(L.lane.x, top, L.lane.w, h);
+  c.restore();
+}
+
+function drawRhythmPad() {
+  const L = S.layout, c = ctx;
+  const pad = { x: L.lane.x, w: L.lane.w, y: L.judgeY + 14, h: Math.max(72, L.H - L.judgeY - 40) };
+  const press = S.press.rhythm || 0;
+  const rest = S.rhythmRest;
+
+  c.save();
+  const grad = c.createLinearGradient(0, pad.y, 0, pad.y + pad.h);
+  if (rest) {
+    grad.addColorStop(0, 'rgba(140,148,166,' + (0.10 + press * 0.08) + ')');
+    grad.addColorStop(1, 'rgba(140,148,166,0.03)');
+  } else {
+    grad.addColorStop(0, 'rgba(255,201,77,' + (0.08 + press * 0.16) + ')');
+    grad.addColorStop(1, 'rgba(255,201,77,' + (0.02 + press * 0.05) + ')');
+  }
+  c.fillStyle = grad;
+  roundRect(c, pad.x, pad.y, pad.w, pad.h, 20);
+  c.fill();
+
+  c.strokeStyle = rest
+    ? 'rgba(140,148,166,' + (0.20 + press * 0.25) + ')'
+    : 'rgba(255,201,77,' + (0.20 + press * 0.42) + ')';
+  c.lineWidth = 1.5;
+  c.stroke();
+
+  const cx = pad.x + pad.w / 2;
+  const cy = pad.y + pad.h / 2;
+
+  // 中心圆：按下时扩散
+  const r = 22 + press * 10;
+  c.beginPath();
+  c.arc(cx, cy, r, 0, Math.PI * 2);
+  c.fillStyle = rest ? 'rgba(140,148,166,0.10)' : 'rgba(255,201,77,' + (0.07 + press * 0.20) + ')';
+  c.fill();
+  c.strokeStyle = rest ? 'rgba(140,148,166,0.24)' : 'rgba(255,201,77,' + (0.28 + press * 0.4) + ')';
+  c.lineWidth = 1;
+  c.stroke();
+
+  c.textAlign = 'center';
+  c.textBaseline = 'middle';
+  if (rest) {
+    c.fillStyle = 'rgba(180,188,204,0.66)';
+    c.font = '600 13px -apple-system, sans-serif';
+    c.fillText('休 止', cx, cy);
+    c.fillStyle = 'rgba(180,188,204,0.34)';
+    c.font = '500 10px -apple-system, sans-serif';
+    c.fillText('这一段别敲', cx, cy + 20);
+  } else {
+    c.fillStyle = 'rgba(255,201,77,' + (0.5 + press * 0.45) + ')';
+    c.font = '600 13px -apple-system, sans-serif';
+    c.fillText('敲 击', cx, cy);
+    c.fillStyle = 'rgba(255,201,77,0.30)';
+    c.font = '500 10px -apple-system, sans-serif';
+    c.fillText('长音符按住不放', cx, cy + 20);
+  }
+  c.restore();
+}
+
+function drawRhythmNote(n, t) {
+  const L = S.layout, c = ctx;
+  const g = noteGeom(n);
+  const yOnset = L.judgeY - (n.time - t) * L.speed;
+  const hFull = Math.max(10, n.dur * L.speed);
+  const h = Math.min(hFull, L.H * 1.6);
+  const top = yOnset - h;
+  const bottom = yOnset;
+  if (bottom < L.top - 30 || top > L.H + 30) return;
+
+  const x = g.cx - g.w / 2, w = g.w;
+  const beat = 60 / S.song.bpm;
+
+  c.save();
+  // 只画卷帘内部：上不盖 HUD，下不越过判定线（落到击打区交给 pad）
+  c.beginPath();
+  c.rect(L.lane.x, L.top, L.lane.w, L.judgeY + 1 - L.top);
+  c.clip();
+
+  if (n.type === 'rest') {
+    const rh = Math.max(6, h - 2);
+    c.fillStyle = 'rgba(20,24,32,0.55)';
+    roundRect(c, x, top + 1, w, rh, 9);
+    c.fill();
+    c.fillStyle = 'rgba(150,160,178,0.10)';
+    c.fill();
+
+    // 斜线阴影：一眼看出"这里没有声音"
+    c.save();
+    roundRect(c, x, top + 1, w, rh, 9);
+    c.clip();
+    c.strokeStyle = 'rgba(150,160,178,0.13)';
+    c.lineWidth = 1;
+    for (let sx = x - rh; sx < x + w + rh; sx += 9) {
+      c.beginPath();
+      c.moveTo(sx, top + rh);
+      c.lineTo(sx + rh, top);
+      c.stroke();
+    }
+    c.restore();
+
+    c.setLineDash([6, 6]);
+    c.strokeStyle = 'rgba(150,160,178,0.30)';
+    c.lineWidth = 1;
+    roundRect(c, x, top + 1, w, rh, 9);
+    c.stroke();
+    c.setLineDash([]);
+    if (h > 34) {
+      c.fillStyle = 'rgba(190,198,214,0.50)';
+      c.font = '600 11px -apple-system, sans-serif';
+      c.textAlign = 'center';
+      c.textBaseline = 'middle';
+      c.fillText('休止 ' + fmtBeats(n.beats), g.cx, top + h / 2);
+    }
+    c.restore();
+    return;
+  }
+
+  const missed = n.status === 'miss';
+  const holding = n.status === 'holding';
+  const color = missed ? '#3A4150' : (n.trip != null ? '#7DD3FC' : MEL_COLOR);
+  c.globalAlpha = missed ? 0.24 : 1;
+
+  const grad = c.createLinearGradient(0, top, 0, bottom);
+  grad.addColorStop(0, hexA(color, 0.05));
+  grad.addColorStop(0.55, hexA(color, holding ? 0.34 : 0.14));
+  grad.addColorStop(1, hexA(color, holding ? 0.55 : 0.26));
+
+  // 先铺一层深底：任何场景下都要能读清
+  c.fillStyle = missed ? 'rgba(26,30,38,0.6)' : 'rgba(9,12,18,0.66)';
+  roundRect(c, x, top, w, Math.max(6, h), 10);
+  c.fill();
+
+  c.fillStyle = grad;
+  c.fill();
+
+  c.strokeStyle = hexA(color, missed ? 0.16 : 0.62);
+  c.lineWidth = 1.4;
+  c.stroke();
+
+  // 内部拍线：几拍一眼看出
+  if (n.dur > beat * 1.15) {
+    c.strokeStyle = hexA(color, 0.20);
+    c.lineWidth = 1;
+    for (let k = 1; k * beat < n.dur - 1e-6; k++) {
+      const yy = bottom - k * beat * L.speed;
+      if (yy > top + 3 && yy < bottom - 8) {
+        c.beginPath();
+        c.moveTo(x + 7, yy);
+        c.lineTo(x + w - 7, yy);
+        c.stroke();
+      }
+    }
+  }
+
+  // 头部：落点，必须最亮
+  const hh = Math.min(9, Math.max(5, h * 0.3));
+  c.fillStyle = missed ? 'rgba(90,98,114,0.5)' : color;
+  roundRect(c, x, bottom - hh, w, hh, hh / 2);
+  c.fill();
+  c.fillStyle = 'rgba(255,255,255,0.34)';
+  roundRect(c, x + 4, bottom - hh + 2, w - 8, Math.max(1.5, hh * 0.3), 1);
+  c.fill();
+
+  // 时值标签：贴着头部，永远在视野里
+  if (!missed && h > 22 && bottom - hh - 4 > top + 3) {
+    c.fillStyle = 'rgba(255,255,255,0.66)';
+    c.font = '700 10px -apple-system, sans-serif';
+    c.textAlign = 'left';
+    c.textBaseline = 'bottom';
+    c.fillText(fmtBeats(n.beats) + '拍' + (n.dotted ? '·' : ''), x + 10, bottom - hh - 5);
+  }
+
+  // 三连音标记
+  if (n.trip != null && h > 14) {
+    c.fillStyle = 'rgba(125,211,252,0.9)';
+    c.font = '700 10px -apple-system, sans-serif';
+    c.textAlign = 'right';
+    c.textBaseline = 'bottom';
+    c.fillText('3', x + w - 9, bottom - hh - 5);
+  }
+
+  // 连音线：顶部一个小弧，表示这条是接过来的
+  if (n.tie) {
+    c.strokeStyle = hexA(color, 0.72);
+    c.lineWidth = 1.5;
+    c.beginPath();
+    c.arc(g.cx, top + 20, Math.min(28, w * 0.1), Math.PI * 1.16, Math.PI * 1.84);
+    c.stroke();
+  }
+
+  // 正被按住：判定线以下亮起来
+  if (holding) {
+    const fromY = Math.max(top, L.judgeY);
+    const toY = Math.min(L.H, Math.max(bottom, L.judgeY + 40));
+    if (toY > fromY) {
+      const hg = c.createLinearGradient(0, L.judgeY, 0, toY + 60);
+      hg.addColorStop(0, hexA(color, 0.34));
+      hg.addColorStop(1, hexA(color, 0));
+      c.fillStyle = hg;
+      c.fillRect(x, L.judgeY, w, toY - L.judgeY + 60);
+    }
+  }
+
+  c.restore();
+}
+
+function fmtBeats(b) {
+  if (Math.abs(b - 4) < 1e-6) return '4';
+  if (Math.abs(b - 3) < 1e-6) return '3';
+  if (Math.abs(b - 2) < 1e-6) return '2';
+  if (Math.abs(b - 1.5) < 1e-6) return '1½';
+  if (Math.abs(b - 1) < 1e-6) return '1';
+  if (Math.abs(b - 0.75) < 1e-6) return '¾';
+  if (Math.abs(b - 0.5) < 1e-6) return '½';
+  if (Math.abs(b - 2 / 3) < 1e-6) return '⅔';
+  return String(Math.round(b * 100) / 100);
+}
+
 function drawHitZone() {
   const L = S.layout, c = ctx;
+  if (S.mode === 'rhythm') {
+    drawRhythmPad();
+    return;
+  }
   const zoneH = L.H - L.judgeY;
 
   const grad = c.createLinearGradient(0, L.judgeY, 0, L.H);
@@ -589,28 +895,32 @@ function drawHitZone() {
 function drawJudgeLine() {
   const L = S.layout, c = ctx;
   const pulse = S.beatPulse;
+  const rhythm = S.mode === 'rhythm';
+  const x0 = rhythm ? L.lane.x : 0;
+  const x1 = rhythm ? L.lane.x + L.lane.w : L.W;
+  const accent = rhythm ? '255,201,77' : '53,208,186';
 
   const glow = c.createLinearGradient(0, L.judgeY - 64, 0, L.judgeY + 2);
-  glow.addColorStop(0, 'rgba(53,208,186,0)');
-  glow.addColorStop(1, 'rgba(53,208,186,' + (0.16 + pulse * 0.2) + ')');
+  glow.addColorStop(0, 'rgba(' + accent + ',0)');
+  glow.addColorStop(1, 'rgba(' + accent + ',' + (0.16 + pulse * 0.2) + ')');
   c.fillStyle = glow;
-  c.fillRect(0, L.judgeY - 64, L.W, 66);
+  c.fillRect(x0, L.judgeY - 64, x1 - x0, 66);
 
   c.strokeStyle = 'rgba(255,255,255,' + (0.5 + pulse * 0.4) + ')';
   c.lineWidth = 2 + pulse * 1.6;
   c.beginPath();
-  c.moveTo(0, L.judgeY);
-  c.lineTo(L.W, L.judgeY);
+  c.moveTo(x0, L.judgeY);
+  c.lineTo(x1, L.judgeY);
   c.stroke();
 
-  c.strokeStyle = 'rgba(53,208,186,' + (0.5 + pulse * 0.4) + ')';
+  c.strokeStyle = 'rgba(' + accent + ',' + (0.5 + pulse * 0.4) + ')';
   c.lineWidth = 1;
   c.beginPath();
-  c.moveTo(0, L.judgeY + 2.5);
-  c.lineTo(L.W, L.judgeY + 2.5);
+  c.moveTo(x0, L.judgeY + 2.5);
+  c.lineTo(x1, L.judgeY + 2.5);
   c.stroke();
 
-  const step = L.laneW || (L.mel ? L.mel.colW : 0);
+  const step = rhythm ? 0 : (L.laneW || (L.mel ? L.mel.colW : 0));
   if (step) {
     c.strokeStyle = 'rgba(255,255,255,0.22)';
     c.lineWidth = 1;
@@ -686,14 +996,18 @@ function drawNote(n, t) {
 }
 
 function drawNotes(t) {
-  const horizon = settings.lookahead + 0.4;
+  const L = S.layout;
+  const horizon = (L.judgeY - CFG.layout.spawn) / L.speed + 0.5;
+  const rhythm = S.mode === 'rhythm';
   for (let i = 0; i < S.notes.length; i++) {
     const n = S.notes[i];
     const dt = n.time - t;
     if (dt > horizon) break;
     if (n.status === 'done') continue;
-    if (n.type === 'hold' ? dt + n.dur < -0.35 : dt < -0.35) continue;
-    drawNote(n, t);
+    const tail = n.time + (n.dur || 0);
+    if (tail < t - 0.5) continue;
+    if (rhythm) drawRhythmNote(n, t);
+    else drawNote(n, t);
   }
 }
 
@@ -747,6 +1061,7 @@ function draw() {
   drawLanes();
   drawHitZone();
   drawNotes(t);
+  if (S.mode === 'rhythm') drawRhythmFade();
   drawJudgeLine();
 
   const now = AudioEng.now();
@@ -831,7 +1146,9 @@ function updateComboUI() {
 function handleHit(x, pid) {
   const L = S.layout;
   const t = elapsed();
-  if (S.mode === 'drummer') {
+  if (S.mode === 'rhythm') {
+    judgeRhythm(t, pid);
+  } else if (S.mode === 'drummer') {
     if (x < 0 || x > L.W) return;
     const lane = clamp(Math.floor(x / L.laneW), 0, 3);
     judgeDrum(lane, t);
@@ -839,6 +1156,109 @@ function handleHit(x, pid) {
     if (L.pad && x < L.pad.w) { startHold(t, pid); return; }
     const col = clamp(Math.floor((x - L.mel.x) / L.mel.colW), 0, 4);
     judgeMel(col, t);
+  }
+}
+
+/* ---------------- 纯节奏模式判定 ---------------- */
+// 起音判时间，长音符再判松手；休止符内敲击算抢拍（只断连击，不扣分）
+
+function activeRest(t) {
+  for (let i = 0; i < S.rests.length; i++) {
+    const r = S.rests[i];
+    if (t >= r.time && t < r.time + r.dur) return r;
+    if (r.time > t) break;
+  }
+  return null;
+}
+
+function judgeRhythm(t, pid) {
+  const w = win();
+  let best = null, bd = 1e9;
+  for (let i = 0; i < S.notes.length; i++) {
+    const n = S.notes[i];
+    if (n.track !== 'rhythm' || n.type === 'rest' || n.status !== 'pending') continue;
+    const d = Math.abs(n.time - t);
+    if (d < bd) { bd = d; best = n; }
+    if (n.time - t > w.good) break;
+  }
+
+  const geom = (n) => ({
+    x: S.layout.lane.x + S.layout.lane.w / 2,
+    y: S.layout.judgeY,
+    n,
+  });
+
+  if (best && bd <= w.good) {
+    const grade = gradeOf(t - best.time) || 'good';
+    S.stats[grade]++;
+    S.devs.push(Math.round((t - best.time) * 1000));
+    S.press.rhythm = 1;
+    playTimbre(AudioEng.now(), 1);
+
+    if (best.type === 'hold') {
+      best.status = 'holding';
+      best.grade = grade;
+      best.heldFrom = t;
+      best.pid = pid;
+      S.holds.set('rhythm', best);
+      // 起音先给 60%，松手结算剩下的 40%
+      const g = geom(best);
+      addScore(CFG.score[grade] * 0.6, g.x, g.y, grade);
+    } else {
+      best.status = 'done';
+      const g = geom(best);
+      addScore(CFG.score[grade], g.x, g.y, grade);
+    }
+    return;
+  }
+
+  // 休止符里抢拍
+  const rest = activeRest(t);
+  if (rest) {
+    S.restHits++;
+    S.combo = 0;
+    updateComboUI();
+    S.press.rhythm = 1;
+    if (window.SFX) SFX.sfx('buzz', AudioEng.now(), { gain: 0.5 });
+    S.floats.push({
+      x: S.layout.lane.x + S.layout.lane.w / 2, y: S.layout.judgeY - 40,
+      text: '休止', color: '#8C94A6', t0: AudioEng.now(), life: 0.5, size: 13,
+    });
+    return;
+  }
+
+  // 空击：轻响，不罚
+  S.press.rhythm = 1;
+  playTimbre(AudioEng.now(), 0.4);
+}
+
+function endRhythmHold(t) {
+  const n = S.holds.get('rhythm');
+  if (!n) return;
+  S.holds.delete('rhythm');
+
+  const end = n.time + n.dur;
+  const ratio = clamp((t - n.time) / n.dur, 0, 1);
+  const ok = t >= end - 0.14;
+  n.status = 'done';
+  n.heldRatio = ratio;
+
+  S.holdSum += ok ? 1 : ratio;
+  S.holdCount++;
+  if (!ok) S.stats.short++;
+
+  const base = CFG.score[n.grade] * 0.4 * (ok ? 1 : ratio);
+  S.score += Math.round(base);
+  S.earned += base;
+  const el = $('#hudScore');
+  el.textContent = S.score;
+
+  if (!ok) {
+    S.floats.push({
+      x: S.layout.lane.x + S.layout.lane.w / 2, y: S.layout.judgeY - 26,
+      text: '时值 ' + Math.round(ratio * 100) + '%', color: '#FFC94D',
+      t0: AudioEng.now(), life: 0.55, size: 11,
+    });
   }
 }
 
@@ -904,7 +1324,7 @@ function judgeMel(col, t) {
       S.stats.good++;
       S.stats.pitch++;
       S.devs.push(Math.round((t - r.anyBest.time) * 1000));
-      AudioEng.tone(AudioEng.now(), S.song.root + PENTA[S.song.scale][col], 0.4, 1);
+      AudioEng.playHit({ track: 'mel', col });
       addScore(CFG.score.good, geom.cx, S.layout.judgeY, 'good');
       S.floats.push({
         x: S.layout.W / 2, y: S.layout.judgeY - 70,
@@ -944,7 +1364,7 @@ function startHold(t, pid) {
     best.heldFrom = t;
     best.pid = pid;
     S.holds.set('pad', best);
-    AudioEng.playHit(best);
+    best.audio = AudioEng.playHit(best);
   }
 }
 
@@ -952,6 +1372,7 @@ function endHold(t) {
   const n = S.holds.get('pad');
   if (!n) return;
   S.holds.delete('pad');
+  if (n.audio && n.audio.stop) n.audio.stop(AudioEng.now());
   const held = clamp((t - n.time) / n.dur, 0, 1);
   n.status = 'done';
   n.heldRatio = held;
@@ -979,7 +1400,8 @@ function update(t) {
   for (let i = 0; i < S.notes.length; i++) {
     const n = S.notes[i];
     if (n.status !== 'pending') continue;
-    const limit = n.type === 'hold' ? Math.max(w.good, 0.28) : w.good;
+    if (n.type === 'rest') continue;
+    const limit = (S.mode !== 'rhythm' && n.type === 'hold') ? Math.max(w.good, 0.28) : w.good;
     if (t > n.time + limit) {
       n.status = 'miss';
       n.grade = 'miss';
@@ -998,6 +1420,13 @@ function update(t) {
 
   const hold = S.holds.get('pad');
   if (hold && t >= hold.time + hold.dur) endHold(t);
+
+  const rh = S.holds.get('rhythm');
+  if (rh && t >= rh.time + rh.dur + 0.05) endRhythmHold(t);
+
+  if (S.mode === 'rhythm') {
+    S.rhythmRest = activeRest(t);
+  }
 
   // 拍脉冲
   const beat = 60 / S.song.bpm;
@@ -1112,9 +1541,14 @@ function startRun() {
   S.combo = 0;
   S.maxCombo = 0;
   S.earned = 0;
-  S.stats = { perfect: 0, great: 0, good: 0, miss: 0, pitch: 0 };
+  S.stats = { perfect: 0, great: 0, good: 0, miss: 0, pitch: 0, short: 0 };
   S.devs = [];
   S.holds.clear();
+  S.restHits = 0;
+  S.holdSum = 0;
+  S.holdCount = 0;
+  S.timbreStep = 0;
+  S.rhythmRest = null;
   S.fx = [];
   S.floats = [];
   S.press = {};
@@ -1130,8 +1564,8 @@ function startRun() {
     AudioEng.click(S.startTime - (CFG.time.countdownBeats - i) * beat, i === 0);
   }
 
-  Backing.build(S.song);
-  Backing.start();
+  Backing.build(S.song, CFG.bars, S.mode === 'rhythm' ? 'rhythm' : 'music');
+  Backing.start(S.startTime, () => AudioEng.now());
 
   $('#hudScore').textContent = '0';
   $('#combo').classList.remove('show');
@@ -1148,13 +1582,14 @@ function endRun() {
   document.body.classList.remove('ingame');
   document.body.classList.remove('zone');
 
-  const total = S.notes.length || 1;
+  const total = S.notes.filter((n) => n.type !== 'rest').length || 1;
   const acc = clamp(S.earned / (total * 100), 0, 1);
   const devAbs = S.devs.length
     ? Math.sqrt(S.devs.reduce((s, d) => s + d * d, 0) / S.devs.length)
     : 0;
   const stability = clamp(100 - devAbs / 1.5, 0, 100);
   const full = clamp(1 - S.stats.miss / total, 0, 1);
+  const timeval = S.holdCount ? clamp((S.holdSum / S.holdCount) * 100, 0, 100) : 100;
 
   let g = 'D';
   for (const [th, letter] of CFG.grade) { if (acc >= th) { g = letter; break; } }
@@ -1164,7 +1599,15 @@ function endRun() {
   $('#rScore').textContent = S.score;
   $('#rCombo').textContent = S.maxCombo;
 
-  renderMetrics(acc, stability, full);
+  const rows = [
+    ['准确率', acc * 100, acc * 100],
+    ['稳定度', stability, stability],
+    ['完整度', full * 100, full * 100],
+  ];
+  if (S.mode === 'rhythm') {
+    rows[2] = ['时值', timeval, timeval];
+  }
+  renderMetrics(rows);
   renderHisto();
 
   const mean = S.devs.length ? S.devs.reduce((s, d) => s + d, 0) / S.devs.length : 0;
@@ -1172,17 +1615,17 @@ function endRun() {
   if (mean < -40) diag = '你整体偏早 ' + Math.abs(Math.round(mean)) + 'ms，可以再等一下拍子。';
   else if (mean > 40) diag = '你整体偏慢 ' + Math.round(mean) + 'ms，试着提前一点。';
   if (S.stats.pitch > 0) diag += ' 有 ' + S.stats.pitch + ' 次音高偏移，听一听再落指。';
+  if (S.mode === 'rhythm') {
+    if (S.restHits > 0) diag += ' 休止里抢了 ' + S.restHits + ' 次，灰色段要留白。';
+    if (S.stats.short > 0) diag += ' 有 ' + S.stats.short + ' 个长音符没按满。';
+    if (S.restHits === 0 && S.stats.short === 0) diag += ' 时值很干净：该停的地方停了，该拖的地方拖满了。';
+  }
   $('#diag').textContent = diag;
 
   showScreen('screenResult');
 }
 
-function renderMetrics(acc, stability, full) {
-  const rows = [
-    ['准确率', acc * 100, acc * 100],
-    ['稳定度', stability, stability],
-    ['完整度', full * 100, full * 100],
-  ];
+function renderMetrics(rows) {
   $('#metrics').innerHTML = rows.map((r) => (
     '<div class="metric"><span class="k">' + r[0] + '</span>' +
     '<span class="bar"><i style="width:' + r[1].toFixed(1) + '%"></i></span>' +
@@ -1203,6 +1646,41 @@ function renderHisto() {
     const cls = i === 10 ? 'zero' : i < 10 ? 'early' : 'late';
     return '<i class="' + cls + '" style="height:' + h.toFixed(0) + '%"></i>';
   }).join('');
+}
+
+function renderTimbres() {
+  const cur = settings.timbre || 'wood';
+  $('#timbreRow').innerHTML = TIMBRES.map((t) => (
+    '<button class="timbre' + (t.id === cur ? ' on' : '') + '" data-t="' + t.id + '">' +
+    '<span><svg viewBox="0 0 16 16">' + t.ico + '</svg></span><b>' + t.name + '</b></button>'
+  )).join('');
+  $$('#timbreRow .timbre').forEach((el) => {
+    el.addEventListener('click', () => {
+      settings.timbre = el.dataset.t;
+      saveSettings();
+      renderTimbres();
+      if (window.SFX && settings.sound) {
+        AudioEng.init();
+        SFX.sfx(settings.timbre, AudioEng.now() + 0.02, { gain: 0.9 });
+      }
+    });
+  });
+}
+
+/* 模式切换时，首页各块的文案与可见性 */
+function updateModeChrome() {
+  document.body.dataset.mode = S.mode;
+  const rhythm = S.mode === 'rhythm';
+  $('#diffNote').textContent = DIFF_NOTE[S.mode][S.diff];
+  $('#startBtn').textContent = rhythm ? '开始练习' : '开始演奏';
+  $('#songHint').textContent = rhythm
+    ? '随机谱面 · ' + CFG.bars + ' 小节'
+    : Math.round(CFG.bars * S.song.meter * 60 / S.song.bpm) + ' 秒';
+  $('#timbreBlock').classList.toggle('hide', !rhythm);
+  $('#songBlockTitle').textContent = rhythm ? '伴奏' : '曲目';
+  $$('.only-melodist').forEach((el) => el.classList.toggle('dim', rhythm));
+  if (rhythm) $('#foot').textContent = '跟着节拍器敲 · 灰色段要留白 · 没有失败';
+  else $('#foot').textContent = '跟着拍子敲准就好 · 没有失败';
 }
 
 /* ============================================================
@@ -1226,8 +1704,8 @@ function renderSongs() {
       S.song = SONGS.find((x) => x.id === el.dataset.id);
       $$('#songList .song').forEach((x) => x.classList.remove('on'));
       el.classList.add('on');
-      $('#songHint').textContent = Math.round(CFG.bars * S.song.meter * 60 / S.song.bpm) + ' 秒';
       applyScene(S.song);
+      updateModeChrome();
     });
   });
 }
@@ -1239,6 +1717,7 @@ function bindUI() {
       $$('#modeRow .mode-card').forEach((x) => x.classList.remove('on'));
       el.classList.add('on');
       computeLayout();
+      updateModeChrome();
     });
   });
 
@@ -1247,12 +1726,8 @@ function bindUI() {
       S.diff = el.dataset.d;
       $$('#diffSeg button').forEach((x) => x.classList.remove('on'));
       el.classList.add('on');
-      const note = {
-        casual: '音符稀疏，判定宽松，适合找感觉',
-        normal: '正反拍都有，判定标准',
-        strict: '加花与切分，判定严格',
-      }[S.diff];
-      $('#diffNote').textContent = note;
+      $('#diffNote').textContent = DIFF_NOTE[S.mode][S.diff];
+      if (S.mode === 'rhythm') updateModeChrome();
     });
   });
 
@@ -1341,8 +1816,10 @@ function bindUI() {
 
   const releaseHold = (e) => {
     if (S.phase !== 'playing') return;
-    const n = S.holds.get('pad');
-    if (n && n.pid === e.pointerId) endHold(elapsed());
+    const p = S.holds.get('pad');
+    if (p && p.pid === e.pointerId) endHold(elapsed());
+    const r = S.holds.get('rhythm');
+    if (r && r.pid === e.pointerId) endRhythmHold(elapsed());
   };
   window.addEventListener('pointerup', releaseHold);
   window.addEventListener('pointercancel', releaseHold);
@@ -1366,6 +1843,6 @@ applyScene(S.song);
 $('#sheet').classList.add('hide');
 $('#screenResult').classList.add('hide');
 $('#pauseModal').classList.add('hide');
-$('#songHint').textContent = Math.round(CFG.bars * S.song.meter * 60 / S.song.bpm) + ' 秒';
-$('#diffNote').textContent = '正反拍都有，判定标准';
+renderTimbres();
+updateModeChrome();
 requestAnimationFrame(loop);

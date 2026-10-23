@@ -97,11 +97,23 @@
         <b>旋律家</b>
         <em>双轨 · 练音感</em>
       </button>
+      <button class="mode-card" data-mode="rhythm">
+        <span class="mode-ico">
+          <svg viewBox="0 0 32 32"><rect x="7" y="14" width="5" height="5" rx="1.6"/><rect x="13.5" y="14" width="5" height="5" rx="1.6"/><rect x="19" y="10" width="4" height="9" rx="1.6"/><rect x="24" y="17" width="4" height="2.4" rx="1.2" opacity="0.55"/></svg>
+        </span>
+        <b>节奏</b>
+        <em>单轨 · 练时值</em>
+      </button>
     </div>
   </div>
 
+  <div class="block" id="timbreBlock">
+    <div class="block-head"><h2>音色</h2><span class="hint">敲起来更解压</span></div>
+    <div class="timbre-row" id="timbreRow"></div>
+  </div>
+
   <div class="block">
-    <div class="block-head"><h2>曲目</h2><span class="hint" id="songHint">16 小节</span></div>
+    <div class="block-head"><h2 id="songBlockTitle">曲目</h2><span class="hint" id="songHint">16 小节</span></div>
     <div class="song-list" id="songList"></div>
   </div>
 
@@ -116,7 +128,7 @@
   </div>
 
   <button class="primary" id="startBtn">开始演奏</button>
-  <p class="foot">跟着拍子敲准就好 · 没有失败</p>
+  <p class="foot" id="foot">跟着拍子敲准就好 · 没有失败</p>
 
   <button class="gear" id="settingsBtn" aria-label="设置">
     <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.8v2.6M12 18.6v2.6M3.4 12h2.6M18 12h2.6M5.9 5.9l1.9 1.9M16.2 16.2l1.9 1.9M18.1 5.9l-1.9 1.9M7.8 16.2l-1.9 1.9"/></svg>
@@ -150,12 +162,12 @@
     </div>
   </div>
 
-  <div class="row toggle-row">
+  <div class="row toggle-row only-melodist">
     <div class="row-label"><b>PAD 轨</b><em>关闭后只剩旋律</em></div>
     <button class="switch on" id="padSwitch" data-key="padOn"><span></span></button>
   </div>
 
-  <div class="row toggle-row">
+  <div class="row toggle-row only-melodist">
     <div class="row-label"><b>音高判定</b><em>关闭后退化为纯节奏</em></div>
     <button class="switch on" id="pitchSwitch" data-key="pitchJudge"><span></span></button>
   </div>
@@ -206,6 +218,8 @@
 </section>
 
 <script src="scene.js"></script>
+<script src="sfx.js"></script>
+<script src="backing.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

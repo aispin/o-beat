@@ -231,12 +231,12 @@ body.ingame .veil,
 .hint { font-size: 11px; color: var(--dim); letter-spacing: 0.5px; font-variant-numeric: tabular-nums; }
 
 /* ---------------- 模式卡 ---------------- */
-.mode-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.mode-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
 
 .mode-card {
   position: relative;
   text-align: left;
-  padding: 15px 14px 13px;
+  padding: 13px 11px 11px;
   border-radius: var(--r-md);
   background: var(--surface);
   border: 1px solid var(--line);
@@ -275,17 +275,57 @@ body.ingame .veil,
   transition: fill 0.2s var(--ease), stroke 0.2s var(--ease);
 }
 .mode-card.on .mode-ico svg { fill: var(--accent-a); stroke: var(--accent-a); }
-.mode-card b { display: block; font-size: 15px; font-weight: 600; }
+.mode-card b { display: block; font-size: 14px; font-weight: 600; }
 .mode-card em {
   display: block;
-  margin-top: 4px;
-  font-size: 11px;
+  margin-top: 3px;
+  font-size: 10px;
   font-style: normal;
   color: var(--muted);
+  letter-spacing: 0;
 }
 
+/* ---------------- 搞怪音色 ---------------- */
+.timbre-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.timbre {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 9px 4px 8px;
+  border-radius: var(--r-md);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color 0.18s var(--ease), color 0.18s var(--ease), background 0.18s var(--ease), transform 0.14s var(--ease);
+}
+.timbre:active { transform: scale(0.96); }
+.timbre span { display: block; height: 16px; opacity: 0.62; }
+.timbre span svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.timbre b { font-size: 11px; font-weight: 500; letter-spacing: 0; }
+.timbre.on {
+  border-color: color-mix(in srgb, var(--accent-a) 55%, transparent);
+  background: color-mix(in srgb, var(--accent-a) 12%, transparent);
+  color: var(--text);
+}
+.timbre.on span { opacity: 1; color: var(--accent-a); }
+
+#timbreBlock.hide { display: none; }
+.only-melodist.dim { opacity: 0.32; }
+.only-melodist.dim .switch { pointer-events: none; }
+
 /* ---------------- 曲目 ---------------- */
-.song-list { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+.song-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
 
 .song {
   position: relative;
@@ -342,7 +382,7 @@ body.ingame .veil,
 /* ---------------- 难度 ---------------- */
 .seg {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 4px;
   padding: 4px;
   border-radius: var(--r-md);
