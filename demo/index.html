@@ -1,0 +1,1469 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>AI 鼓手 · 双模式</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body {
+    width:100%; height:100%; overflow:hidden;
+    background:#06080c;
+    font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+    user-select:none; -webkit-user-select:none;
+    -webkit-tap-highlight-color:transparent;
+    touch-action:none;
+  }
+  #game { position:fixed; top:0; left:0; width:100%; height:100%; display:block; }
+
+  .overlay {
+    position:fixed; inset:0; z-index:10;
+    display:flex; align-items:center; justify-content:center;
+    padding:16px;
+    background:rgba(4,6,10,0.75);
+    backdrop-filter:blur(20px); -webkit-backdrop-filter:blur(20px);
+    transition:opacity 0.25s;
+    overflow-y:auto;
+  }
+  .overlay.hidden { opacity:0; pointer-events:none; }
+
+  .panel {
+    width:100%; max-width:380px;
+    background:linear-gradient(150deg,rgba(22,27,38,0.97),rgba(13,17,26,0.97));
+    border:1px solid rgba(120,200,255,0.14);
+    border-radius:22px;
+    padding:22px 20px;
+    box-shadow:0 30px 80px rgba(0,0,0,0.85),inset 0 1px 0 rgba(255,255,255,0.08);
+    max-height:94vh; overflow-y:auto; margin:auto;
+  }
+  .panel::-webkit-scrollbar { width:0; }
+
+  h1 {
+    font-size:22px; text-align:center; letter-spacing:4px; font-weight:800;
+    background:linear-gradient(135deg,#4ecdc4,#44a3f7,#a78bfa);
+    -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text;
+  }
+  .sub { font-size:9px; color:rgba(255,255,255,0.32); text-align:center; letter-spacing:2px; margin:6px 0 16px; font-weight:600; }
+
+  .section-title {
+    font-size:10px; color:rgba(255,255,255,0.4);
+    letter-spacing:2px; margin:14px 0 8px; font-weight:700;
+  }
+
+  .role-grid {
+    display:grid; grid-template-columns:1fr 1fr; gap:8px;
+  }
+  .role {
+    background:rgba(255,255,255,0.05);
+    border:1px solid rgba(255,255,255,0.08);
+    border-radius:14px; padding:14px 10px;
+    cursor:pointer; transition:all 0.15s; text-align:center;
+  }
+  .role:active { transform:scale(0.97); }
+  .role.on {
+    background:linear-gradient(135deg,rgba(78,205,196,0.25),rgba(68,163,247,0.25));
+    border-color:rgba(78,205,196,0.5);
+    box-shadow:0 0 20px rgba(78,205,196,0.3);
+  }
+  .role .icon { font-size:24px; margin-bottom:6px; }
+  .role .n { font-size:13px; font-weight:700; color:#fff; margin-bottom:3px; }
+  .role .d { font-size:10px; color:rgba(255,255,255,0.4); }
+
+  .preset-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .preset {
+    background:rgba(255,255,255,0.05);
+    border:1px solid rgba(255,255,255,0.08);
+    border-radius:12px; padding:12px 10px;
+    cursor:pointer; transition:all 0.15s; text-align:left;
+  }
+  .preset:active { transform:scale(0.97); }
+  .preset.on {
+    background:linear-gradient(135deg,rgba(78,205,196,0.25),rgba(68,163,247,0.25));
+    border-color:rgba(78,205,196,0.5);
+  }
+  .preset .n { font-size:13px; font-weight:700; color:#fff; margin-bottom:3px; }
+  .preset .m { font-size:10px; color:rgba(255,255,255,0.4); }
+
+  .slider-row { display:flex; align-items:center; gap:12px; }
+  .slider-row input[type="range"] {
+    flex:1; -webkit-appearance:none; appearance:none;
+    height:4px; background:rgba(255,255,255,0.1);
+    border-radius:2px; outline:none;
+  }
+  .slider-row input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance:none; appearance:none;
+    width:16px; height:16px; border-radius:50%;
+    background:linear-gradient(135deg,#4ecdc4,#44a3f7); cursor:pointer;
+    box-shadow:0 0 10px rgba(78,205,196,0.6);
+  }
+  .slider-row .val {
+    font-family:ui-monospace,Menlo,monospace;
+    font-size:12px; font-weight:700; color:#4ecdc4;
+    min-width:60px; text-align:right;
+  }
+  .slider-note { font-size:10px; color:rgba(255,255,255,0.3); margin-top:6px; }
+
+  .btn-main {
+    width:100%; margin-top:16px; padding:14px 0;
+    background:linear-gradient(135deg,#4ecdc4,#44a3f7);
+    border:none; border-radius:13px; color:#051018;
+    font-size:15px; font-weight:800; letter-spacing:5px;
+    cursor:pointer; font-family:inherit;
+    box-shadow:0 8px 24px rgba(68,163,247,0.4);
+  }
+  .btn-main:active { transform:scale(0.97); }
+
+  .hint {
+    text-align:center; font-size:10px; color:rgba(255,255,255,0.28);
+    margin-top:10px; line-height:1.7;
+  }
+
+  .hud {
+    position:fixed; top:calc(14px + env(safe-area-inset-top)); left:16px;
+    z-index:5; pointer-events:none;
+  }
+  .hud .label { font-size:9px; letter-spacing:2px; color:rgba(255,255,255,0.35); font-weight:700; }
+  .hud .value {
+    font-size:22px; color:#fff; font-weight:800;
+    font-variant-numeric:tabular-nums;
+    font-family:ui-monospace,Menlo,monospace;
+    text-shadow:0 0 16px rgba(100,200,255,0.5);
+  }
+
+  #stopBtn {
+    position:fixed; top:calc(14px + env(safe-area-inset-top)); right:16px;
+    width:38px; height:38px; border-radius:19px;
+    background:rgba(255,255,255,0.08);
+    border:1px solid rgba(255,255,255,0.12);
+    color:rgba(255,255,255,0.7); font-size:15px;
+    cursor:pointer; z-index:5; display:none;
+    align-items:center; justify-content:center;
+    backdrop-filter:blur(10px);
+  }
+  #stopBtn.show { display:flex; }
+
+  .result-row {
+    display:flex; justify-content:space-between;
+    padding:10px 0; border-bottom:1px solid rgba(255,255,255,0.06);
+    font-size:13px;
+  }
+  .result-row:last-child { border-bottom:none; }
+  .result-row .k { color:rgba(255,255,255,0.45); }
+  .result-row .v { font-weight:700; color:#fff; font-variant-numeric:tabular-nums; }
+</style>
+</head>
+<body>
+  <canvas id="game"></canvas>
+
+  <div class="hud" id="hud" style="display:none">
+    <div class="label">SCORE</div>
+    <div class="value" id="score">0</div>
+  </div>
+
+  <button id="stopBtn">✕</button>
+
+  <div class="overlay" id="menu">
+    <div class="panel">
+      <h1>AI 鼓手</h1>
+      <p class="sub">选角色 · 选曲目 · 演奏</p>
+
+      <div class="section-title">1 · 选角色</div>
+      <div class="role-grid" id="roleGrid">
+        <div class="role on" data-role="drummer">
+          <div class="icon">🥁</div>
+          <div class="n">鼓手</div>
+          <div class="d">4 个打击垫 · 打节奏骨架</div>
+        </div>
+        <div class="role" data-role="melodist">
+          <div class="icon">🎸</div>
+          <div class="n">旋律家</div>
+          <div class="d">5 种乐器 · 演奏主旋律</div>
+        </div>
+      </div>
+
+      <div class="section-title">2 · 选曲目</div>
+      <div class="preset-grid" id="presetGrid"></div>
+
+      <div class="section-title">3 · 速度</div>
+      <div class="slider-row">
+        <input type="range" id="speedFactor" min="50" max="150" value="100" step="5">
+        <span class="val" id="speedFactorVal">1.00×</span>
+      </div>
+      <div class="slider-note" id="speedNote">—</div>
+
+      <button class="btn-main" id="startBtn">开 始 演 奏</button>
+      <p class="hint" id="hintText">click 是节拍参考 · 敲打击垫</p>
+    </div>
+  </div>
+
+  <div class="overlay hidden" id="result">
+    <div class="panel">
+      <h1>结算</h1>
+      <p class="sub" id="resultSub">继续加油</p>
+
+      <div class="result-row"><span class="k">SCORE</span><span class="v" id="rScore">0</span></div>
+      <div class="result-row"><span class="k">MAX COMBO</span><span class="v" id="rCombo">0</span></div>
+      <div class="result-row"><span class="k">PERFECT</span><span class="v" style="color:#2ed573" id="rPerfect">0</span></div>
+      <div class="result-row"><span class="k">GOOD</span><span class="v" style="color:#ffd93d" id="rGood">0</span></div>
+      <div class="result-row"><span class="k">BAD</span><span class="v" style="color:#ff4757" id="rBad">0</span></div>
+      <div class="result-row"><span class="k">MISS</span><span class="v" style="color:#8b93a5" id="rMiss">0</span></div>
+
+      <button class="btn-main" id="againBtn">再 来 一 次</button>
+      <button class="btn-main" id="backBtn" style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.75);box-shadow:none;margin-top:10px">返 回 首 页</button>
+    </div>
+  </div>
+
+<script>
+'use strict';
+
+/* ============================================================
+   常量
+   ============================================================ */
+const PRESETS = [
+  { name:'欢快电子', desc:'C · 4/4 · 70',  key:'C',  meter:'4/4', bpm:70, bars:4, chords:['C','Am','F','G'],  rhythm:'eighth',  title:'Happy Synth' },
+  { name:'抒情小调', desc:'Am · 4/4 · 55', key:'Am', meter:'4/4', bpm:55, bars:4, chords:['Am','F','C','G'],  rhythm:'quarter', title:'Sad Piano' },
+  { name:'摇滚',     desc:'G · 4/4 · 80',  key:'G',  meter:'4/4', bpm:80, bars:4, chords:['G','D','Em','C'],  rhythm:'eighth',  title:'Rock Anthem' },
+  { name:'圆舞曲',   desc:'F · 3/4 · 65',  key:'F',  meter:'3/4', bpm:65, bars:4, chords:['F','C','F','C'],   rhythm:'quarter', title:'Waltz' },
+  { name:'五声音阶', desc:'D · 4/4 · 65',  key:'D',  meter:'4/4', bpm:65, bars:4, chords:['D','G','A','D'],   rhythm:'eighth',  title:'Pentatonic' },
+  { name:'冷静 Bossa',desc:'C · 4/4 · 60', key:'C',  meter:'4/4', bpm:60, bars:4, chords:['C','F','G','Am'],  rhythm:'eighth',  title:'Bossa' }
+];
+
+const CHORDS = {
+  'C':[0,4,7], 'D':[2,6,9], 'E':[4,8,11], 'F':[5,9,12],
+  'G':[7,11,14], 'A':[9,1,4], 'B':[11,3,6],
+  'Am':[9,0,4], 'Em':[4,7,11], 'Dm':[2,5,9], 'Bm':[11,2,6]
+};
+
+const DRUM_LANES = [
+  { key:'kick',  label:'KICK',  color:'#ff4757', rgb:[1.00,0.28,0.34] },
+  { key:'ch',    label:'CH',    color:'#ffd93d', rgb:[1.00,0.85,0.24] },
+  { key:'oh',    label:'OH',    color:'#fb923c', rgb:[0.98,0.57,0.24] },
+  { key:'snare', label:'SNARE', color:'#4ecdc4', rgb:[0.31,0.80,0.77] }
+];
+
+const INSTRUMENTS = [
+  { key:'guitar', name:'吉他', color:'#a78bfa', rgb:[0.65,0.55,0.98] },
+  { key:'bass',   name:'贝斯', color:'#4ecdc4', rgb:[0.31,0.80,0.77] },
+  { key:'piano',  name:'钢琴', color:'#ffd93d', rgb:[1.00,0.85,0.24] },
+  { key:'suona',  name:'唢呐', color:'#fb923c', rgb:[0.98,0.57,0.24] },
+  { key:'fx',     name:'音效', color:'#f472b6', rgb:[0.96,0.45,0.71] }
+];
+
+function hexToRgba(hex, a) {
+  const r = parseInt(hex.slice(1,3),16);
+  const g = parseInt(hex.slice(3,5),16);
+  const b = parseInt(hex.slice(5,7),16);
+  return `rgba(${r},${g},${b},${a})`;
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+  if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(x, y, w, h, r); return; }
+  ctx.beginPath();
+  ctx.moveTo(x+r, y);
+  ctx.arcTo(x+w, y, x+w, y+h, r);
+  ctx.arcTo(x+w, y+h, x, y+h, r);
+  ctx.arcTo(x, y+h, x, y, r);
+  ctx.arcTo(x, y, x+w, y, r);
+  ctx.closePath();
+}
+
+/* ============================================================
+   ABC 生成 / 解析
+   ============================================================ */
+function midiToABC(midi) {
+  const names = ['C','^C','D','^D','E','F','^F','G','^G','A','^A','B'];
+  const semis = midi - 60;
+  const oct = Math.floor(semis / 12);
+  const semi = ((semis % 12) + 12) % 12;
+  const name = names[semi];
+  if (oct <= 0) return name + ','.repeat(-oct);
+  if (oct === 1) return name.toLowerCase();
+  return name.toLowerCase() + "'".repeat(oct - 1);
+}
+
+function paramsToABC(p) {
+  const meterNum = parseInt(p.meter);
+  const notesPerBar = p.rhythm === 'eighth' ? meterNum * 2 : meterNum;
+  const suffix = p.rhythm === 'eighth' ? '' : '2';
+  let curMidi = 72;
+  const bars = [];
+
+  for (let b = 0; b < p.bars; b++) {
+    const chord = CHORDS[p.chords[b % p.chords.length]] || CHORDS['C'];
+    const bar = [];
+    for (let i = 0; i < notesPerBar; i++) {
+      let midi;
+      if (i === 0) midi = 60 + chord[0] + 12;
+      else if (i === notesPerBar - 1) midi = 60 + (Math.random() < 0.5 ? chord[0] : chord[2]) + 12;
+      else {
+        if (Math.random() < 0.68) midi = 60 + chord[Math.floor(Math.random()*3)] + 12;
+        else {
+          const step = (Math.random() < 0.5 ? -1 : 1) * (1 + Math.floor(Math.random()*2));
+          midi = curMidi + step;
+        }
+      }
+      if (Math.abs(midi - curMidi) > 7) midi = curMidi + Math.sign(midi - curMidi) * 7;
+      while (midi < 72) midi += 12;
+      while (midi > 84) midi -= 12;
+      curMidi = midi;
+      bar.push(midi);
+    }
+    bars.push(bar);
+  }
+
+  return [
+    'X:1',
+    'T:' + (p.title || 'AI Melody'),
+    'M:' + p.meter,
+    'L:1/8',
+    'Q:1/4=' + p.bpm,
+    'K:' + p.key,
+    ...bars.map(bar => bar.map(m => midiToABC(m) + suffix).join(' ') + ' |')
+  ].join('\n');
+}
+
+function parseABC(abc) {
+  const lines = abc.split('\n').map(l => l.trim()).filter(Boolean);
+  const header = {}; const bodyLines = [];
+  for (const line of lines) {
+    if (line.startsWith('%')) continue;
+    const m = line.match(/^([A-Za-z]):\s*(.*)$/);
+    if (m && !bodyLines.length) header[m[1].toUpperCase()] = m[2].trim();
+    else bodyLines.push(line);
+  }
+
+  const meterStr = header.M || '4/4';
+  const [meterNum] = meterStr.split('/').map(Number);
+  const L = parseDur(header.L || '1/8');
+
+  const qm = (header.Q || '1/4=100').match(/(\d+)\/(\d+)\s*=\s*(\d+)/);
+  const qNum = qm ? +qm[1] : 1;
+  const qDen = qm ? +qm[2] : 4;
+  const bpmVal = qm ? +qm[3] : 100;
+  const qDur = qNum / qDen;
+  const fullNoteSec = (60 / bpmVal) / qDur;
+  const beatDur = fullNoteSec / 4;
+
+  const key = (header.K || 'C').split(' ')[0];
+  const keySig = {
+    'C':{}, 'G':{'F':1}, 'D':{'F':1,'C':1}, 'F':{'B':-1},
+    'Am':{}, 'Em':{'F':1}, 'Dm':{'B':-1}
+  }[key] || {};
+
+  const body = bodyLines.join(' ');
+  const tokens = body.match(/(\^{1,2}|_{1,2}|=)?([A-Ga-gz])(\d*\/?\d*)?|\|/g) || [];
+  const notes = []; let cursor = 0;
+
+  for (const tk of tokens) {
+    if (tk === '|') continue;
+    const m = tk.match(/^(\^{1,2}|_{1,2}|=)?([A-Ga-gz])(\d*\/?\d*)?$/);
+    if (!m) continue;
+    const [, acc, letter, durStr] = m;
+
+    let dur;
+    if (!durStr) dur = L;
+    else if (durStr === '/') dur = L * 0.5;
+    else if (durStr === '//') dur = L * 0.25;
+    else if (durStr.startsWith('/')) dur = L / (+durStr.slice(1) || 2);
+    else if (durStr.includes('/')) {
+      const [a, b] = durStr.split('/');
+      dur = L * (+a || 1) / (+b || 2);
+    } else dur = L * (+durStr);
+
+    if (letter === 'z') { cursor += dur; continue; }
+
+    const base = letter.toUpperCase();
+    const oct = letter === base ? 0 : 1;
+    const semiMap = { C:0,D:2,E:4,F:5,G:7,A:9,B:11 };
+    let ks = keySig[base] || 0;
+    if (acc === '^') ks = 1;
+    else if (acc === '^^') ks = 2;
+    else if (acc === '_') ks = -1;
+    else if (acc === '__') ks = -2;
+    else if (acc === '=') ks = 0;
+
+    notes.push({ midi: 12 * (oct + 5) + semiMap[base] + ks, start: cursor, dur });
+    cursor += dur;
+  }
+
+  for (const n of notes) {
+    n.time = n.start * fullNoteSec;
+    n.durSec = n.dur * fullNoteSec;
+  }
+
+  return { meterStr, meterNum, beatDur, bpm: bpmVal, notes, totalDur: cursor * fullNoteSec };
+}
+
+function parseDur(s) {
+  if (!s) return 1;
+  if (s.includes('/')) {
+    const [a, b] = s.split('/');
+    return (+a || 1) / (+b || 2);
+  }
+  return +s || 1;
+}
+
+/* ============================================================
+   谱面推导
+   ============================================================ */
+function deriveDrumChart(melody) {
+  const { beatDur, meterNum, totalDur } = melody;
+  const barDur = beatDur * meterNum;
+  const totalBars = Math.ceil(totalDur / barDur);
+  const chart = [];
+
+  for (let bar = 0; bar < totalBars; bar++) {
+    const barStart = bar * barDur;
+    for (let b = 0; b < meterNum; b++) {
+      const beatTime = barStart + b * beatDur;
+
+      // 拍点：kick(0) 或 snare(3)
+      let isSnare;
+      if (meterNum === 4) isSnare = (b === 1 || b === 3);
+      else if (meterNum === 3) isSnare = (b > 0);
+      else isSnare = (b % 2 === 1);
+
+      chart.push({ time: beatTime, lane: isSnare ? 3 : 0 });
+
+      // 八分后半：CH(1) 或 OH(2) 在小节末
+      const halfTime = beatTime + beatDur / 2;
+      if (halfTime < barStart + barDur - 0.001) {
+        const isLastBeat = b === meterNum - 1;
+        chart.push({ time: halfTime, lane: isLastBeat ? 2 : 1 });
+      }
+    }
+  }
+  return chart.sort((a, b) => a.time - b.time);
+}
+
+function deriveMelodyChart(melody) {
+  return melody.notes.map(n => ({
+    time: n.time,
+    midi: n.midi,
+    dur: n.durSec
+  }));
+}
+
+function computeWin(beatDur, gap) {
+  return {
+    perfect: Math.min(beatDur * 0.14, gap * 0.35),
+    good:    Math.min(beatDur * 0.28, gap * 0.45),
+    bad:     Math.min(beatDur * 0.42, gap * 0.48)
+  };
+}
+
+/* ============================================================
+   音色引擎
+   ============================================================ */
+class SoundEngine {
+  constructor() { this.ctx = null; this.ready = false; }
+
+  init() {
+    if (this.ctx) { if (this.ctx.state === 'suspended') this.ctx.resume(); return; }
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    this.ctx = new AC();
+
+    this.clickGain = this.ctx.createGain();
+    this.clickGain.gain.value = 0.28;
+    this.clickGain.connect(this.ctx.destination);
+
+    this.drumGain = this.ctx.createGain();
+    this.drumGain.gain.value = 0.6;
+    this.drumGain.connect(this.ctx.destination);
+
+    this.melodyGain = this.ctx.createGain();
+    this.melodyGain.gain.value = 0.5;
+    this.melodyGain.connect(this.ctx.destination);
+
+    this.bgDrumGain = this.ctx.createGain();
+    this.bgDrumGain.gain.value = 0.18;
+    this.bgDrumGain.connect(this.ctx.destination);
+
+    this.noiseBuf = this._makeNoise();
+    this.ready = true;
+  }
+
+  _makeNoise() {
+    const len = this.ctx.sampleRate;
+    const buf = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+    return buf;
+  }
+
+  now() { return this.ctx ? this.ctx.currentTime : performance.now() / 1000; }
+
+  playClick(t, accent) {
+    if (!this.ready) return;
+    const o = this.ctx.createOscillator(), g = this.ctx.createGain();
+    o.type = 'square';
+    o.frequency.value = accent ? 2200 : 1500;
+    g.gain.setValueAtTime(0.001, t);
+    g.gain.exponentialRampToValueAtTime(accent ? 0.16 : 0.10, t + 0.002);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.035);
+    o.connect(g); g.connect(this.clickGain);
+    o.start(t); o.stop(t + 0.05);
+  }
+
+  /* lane: 0=kick 1=CH 2=OH 3=snare */
+  playDrum(lane, t, vol = 1, dest = null) {
+    if (!this.ready) return;
+    const out = dest || this.drumGain;
+
+    switch (lane) {
+      case 0: { // kick
+        const o = this.ctx.createOscillator(), g = this.ctx.createGain();
+        o.type = 'sine';
+        o.frequency.setValueAtTime(180, t);
+        o.frequency.exponentialRampToValueAtTime(45, t + 0.1);
+        g.gain.setValueAtTime(0, t);
+        g.gain.linearRampToValueAtTime(0.9 * vol, t + 0.005);
+        g.gain.exponentialRampToValueAtTime(0.001, t + 0.28);
+        o.connect(g); g.connect(out);
+        o.start(t); o.stop(t + 0.3);
+        break;
+      }
+      case 1: { // CH closed
+        const s = this.ctx.createBufferSource(); s.buffer = this.noiseBuf;
+        const hp = this.ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 8500;
+        const g = this.ctx.createGain();
+        g.gain.setValueAtTime(0.28 * vol, t);
+        g.gain.exponentialRampToValueAtTime(0.001, t + 0.05);
+        s.connect(hp); hp.connect(g); g.connect(out);
+        s.start(t); s.stop(t + 0.07);
+        break;
+      }
+      case 2: { // OH open
+        const s = this.ctx.createBufferSource(); s.buffer = this.noiseBuf;
+        const hp = this.ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 7000;
+        const g = this.ctx.createGain();
+        g.gain.setValueAtTime(0.32 * vol, t);
+        g.gain.exponentialRampToValueAtTime(0.001, t + 0.28);
+        s.connect(hp); hp.connect(g); g.connect(out);
+        s.start(t); s.stop(t + 0.3);
+        break;
+      }
+      case 3: { // snare
+        const s = this.ctx.createBufferSource(); s.buffer = this.noiseBuf;
+        const hp = this.ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 1500;
+        const g = this.ctx.createGain();
+        g.gain.setValueAtTime(0.55 * vol, t);
+        g.gain.exponentialRampToValueAtTime(0.001, t + 0.14);
+        s.connect(hp); hp.connect(g); g.connect(out);
+        s.start(t); s.stop(t + 0.16);
+        const o = this.ctx.createOscillator(), og = this.ctx.createGain();
+        o.type = 'triangle';
+        o.frequency.setValueAtTime(220, t);
+        o.frequency.exponentialRampToValueAtTime(160, t + 0.05);
+        og.gain.setValueAtTime(0.35 * vol, t);
+        og.gain.exponentialRampToValueAtTime(0.001, t + 0.08);
+        o.connect(og); og.connect(out);
+        o.start(t); o.stop(t + 0.1);
+        break;
+      }
+    }
+  }
+
+  /* 乐器演奏 */
+  playInstrument(key, midi, t) {
+    if (!this.ready) return;
+    const freq = 440 * Math.pow(2, (midi - 69) / 12);
+
+    switch (key) {
+      case 'guitar': {
+        const o = this.ctx.createOscillator(), g = this.ctx.createGain();
+        const lp = this.ctx.createBiquadFilter();
+        o.type = 'triangle';
+        o.frequency.value = freq;
+        lp.type = 'lowpass'; lp.frequency.value = 3200;
+        g.gain.setValueAtTime(0, t);
+        g.gain.linearRampToValueAtTime(0.55, t + 0.008);
+        g.gain.exponentialRampToValueAtTime(0.001, t + 0.42);
+        o.connect(lp); lp.connect(g); g.connect(this.melodyGain);
+        o.start(t); o.stop(t + 0.45);
+        break;
+      }
+      case 'bass': {
+        const o = this.ctx.createOscillator(), g = this.ctx.createGain();
+        o.type = 'sine';
+        o.frequency.value = freq / 2;
+        g.gain.setValueAtTime(0, t);
+        g.gain.linearRampToValueAtTime(0.7, t + 0.01);
+        g.gain.exponentialRampToValueAtTime(0.001, t + 0.5);
+        o.connect(g); g.connect(this.melodyGain);
+        o.start(t); o.stop(t + 0.55);
+        break;
+      }
+      case 'piano': {
+        [1, 2, 3].forEach((h, i) => {
+          const o = this.ctx.createOscillator(), g = this.ctx.createGain();
+          o.type = 'sine';
+          o.frequency.value = freq * h;
+          g.gain.setValueAtTime(0, t);
+          g.gain.linearRampToValueAtTime(0.32 / (i + 1), t + 0.005);
+          g.gain.exponentialRampToValueAtTime(0.001, t + 0.65);
+          o.connect(g); g.connect(this.melodyGain);
+          o.start(t); o.stop(t + 0.7);
+        });
+        break;
+      }
+      case 'suona': {
+        const o = this.ctx.createOscillator(), g = this.ctx.createGain();
+        const lfo = this.ctx.createOscillator(), lg = this.ctx.createGain();
+        o.type = 'sawtooth';
+        o.frequency.value = freq * 1.15;
+        lfo.frequency.value = 6;
+        lg.gain.value = freq * 0.03;
+        lfo.connect(lg); lg.connect(o.frequency);
+        g.gain.setValueAtTime(0, t);
+        g.gain.linearRampToValueAtTime(0.28, t + 0.02);
+        g.gain.exponentialRampToValueAtTime(0.001, t + 0.55);
+        o.connect(g); g.connect(this.melodyGain);
+        o.start(t); lfo.start(t);
+        o.stop(t + 0.6); lfo.stop(t + 0.6);
+        break;
+      }
+      case 'fx': {
+        const fxPool = ['duck', 'fart', 'boing', 'laser'];
+        const fx = fxPool[Math.floor(Math.random() * fxPool.length)];
+        this.playFx(fx, t);
+        break;
+      }
+    }
+  }
+
+  playFx(key, t) {
+    if (!this.ready) return;
+    switch (key) {
+      case 'duck':
+        for (let i = 0; i < 2; i++) {
+          const tt = t + i * 0.1;
+          const o = this.ctx.createOscillator();
+          const bp = this.ctx.createBiquadFilter(), g = this.ctx.createGain();
+          o.type = 'sawtooth';
+          o.frequency.setValueAtTime(620, tt);
+          o.frequency.linearRampToValueAtTime(380, tt + 0.05);
+          o.frequency.linearRampToValueAtTime(560, tt + 0.08);
+          bp.type = 'bandpass'; bp.frequency.value = 1200; bp.Q.value = 8;
+          g.gain.setValueAtTime(0, tt);
+          g.gain.linearRampToValueAtTime(0.6, tt + 0.005);
+          g.gain.exponentialRampToValueAtTime(0.001, tt + 0.09);
+          o.connect(bp); bp.connect(g); g.connect(this.melodyGain);
+          o.start(tt); o.stop(tt + 0.1);
+        }
+        break;
+      case 'fart': {
+        const o = this.ctx.createOscillator(), lp = this.ctx.createBiquadFilter(), g = this.ctx.createGain();
+        o.type = 'sawtooth';
+        o.frequency.setValueAtTime(95, t);
+        o.frequency.linearRampToValueAtTime(65, t + 0.35);
+        const lfo = this.ctx.createOscillator(), lg = this.ctx.createGain();
+        lfo.type = 'sine';
+        lfo.frequency.setValueAtTime(35, t);
+        lfo.frequency.linearRampToValueAtTime(15, t + 0.35);
+        lg.gain.value = 30; lfo.connect(lg); lg.connect(o.frequency);
+        lp.type = 'lowpass';
+        lp.frequency.setValueAtTime(900, t);
+        lp.frequency.exponentialRampToValueAtTime(200, t + 0.35);
+        lp.Q.value = 5;
+        g.gain.setValueAtTime(0, t);
+        g.gain.linearRampToValueAtTime(0.7, t + 0.02);
+        g.gain.exponentialRampToValueAtTime(0.001, t + 0.4);
+        o.connect(lp); lp.connect(g); g.connect(this.melodyGain);
+        o.start(t); lfo.start(t); o.stop(t + 0.45); lfo.stop(t + 0.45);
+        break;
+      }
+      case 'boing': {
+        const o = this.ctx.createOscillator(), g = this.ctx.createGain();
+        o.type = 'sine';
+        o.frequency.setValueAtTime(800, t);
+        o.frequency.exponentialRampToValueAtTime(150, t + 0.25);
+        const lfo = this.ctx.createOscillator(), lg = this.ctx.createGain();
+        lfo.frequency.value = 25; lg.gain.value = 80;
+        lfo.connect(lg); lg.connect(o.frequency);
+        g.gain.setValueAtTime(0, t);
+        g.gain.linearRampToValueAtTime(0.4, t + 0.01);
+        g.gain.exponentialRampToValueAtTime(0.001, t + 0.3);
+        o.connect(g); g.connect(this.melodyGain);
+        o.start(t); lfo.start(t); o.stop(t + 0.35); lfo.stop(t + 0.35);
+        break;
+      }
+      case 'laser': {
+        const o = this.ctx.createOscillator(), g = this.ctx.createGain();
+        o.type = 'square';
+        o.frequency.setValueAtTime(2400, t);
+        o.frequency.exponentialRampToValueAtTime(200, t + 0.12);
+        g.gain.setValueAtTime(0.25, t);
+        g.gain.exponentialRampToValueAtTime(0.001, t + 0.15);
+        o.connect(g); g.connect(this.melodyGain);
+        o.start(t); o.stop(t + 0.18);
+        break;
+      }
+    }
+  }
+}
+
+/* ============================================================
+   游戏主类
+   ============================================================ */
+class RhythmGame {
+  constructor() {
+    this.audio = new SoundEngine();
+    this.canvas = document.getElementById('game');
+    this.ctx = this.canvas.getContext('2d');
+
+    this.role = 'drummer';
+    this.state = {
+      phase: 'menu',
+      preset: null,
+      melody: null,
+      drumNotes: [],
+      melodyNotes: [],
+      startTime: 0,
+      endTime: 0
+    };
+
+    this.padFlash = [0, 0, 0, 0];
+    this.selectedInstrument = 0;
+    this.instFlash = [0, 0, 0, 0, 0];
+
+    this.floats = [];
+    this.score = 0;
+    this.combo = 0;
+    this.maxCombo = 0;
+    this.stats = { perfect: 0, good: 0, bad: 0, miss: 0 };
+    this.biasSum = 0;
+    this.biasCount = 0;
+    this.lineFlash = 0;
+    this.shake = 0;
+    this._lastBeatIdx = -1;
+
+    this.resize();
+    window.addEventListener('resize', () => this.resize());
+    this.canvas.addEventListener('pointerdown', e => this.onPointerDown(e));
+    document.body.addEventListener('touchmove', e => e.preventDefault(), { passive: false });
+
+    this.loop = this.loop.bind(this);
+    requestAnimationFrame(this.loop);
+  }
+
+  resize() {
+    this.dpr = window.devicePixelRatio || 1;
+    this.W = window.innerWidth;
+    this.H = window.innerHeight;
+    this.canvas.width = this.W * this.dpr;
+    this.canvas.height = this.H * this.dpr;
+    this.canvas.style.width = this.W + 'px';
+    this.canvas.style.height = this.H + 'px';
+    this.ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+
+    this.playX = this.W * 0.22;
+    this.pxPerSec = (this.W * 0.78) / 4;
+    this.scoreH = this.role === 'drummer' ? this.H * 0.45 : this.H * 0.55;
+  }
+
+  /* ---------- 启动 ---------- */
+  start(preset) {
+    this.audio.init();
+    this.resize();
+
+    const melody = preset._cachedMelody;
+    if (!melody) { console.warn('未预览'); return; }
+
+    this.state.preset = preset;
+    this.state.melody = melody;
+
+    if (this.role === 'drummer') {
+      this._prepareDrum(preset, melody);
+    } else {
+      this._prepareMelody(preset, melody);
+    }
+
+    this.floats = [];
+    this.score = 0;
+    this.combo = 0;
+    this.maxCombo = 0;
+    this.stats = { perfect: 0, good: 0, bad: 0, miss: 0 };
+    this.biasSum = 0;
+    this.biasCount = 0;
+    this.lineFlash = 0;
+    this.shake = 0;
+    this._lastBeatIdx = -1;
+    this.padFlash = [0, 0, 0, 0];
+    this.instFlash = [0, 0, 0, 0, 0];
+
+    const beatDur = melody.beatDur;
+    const barDur = beatDur * melody.meterNum;
+    const now = this.audio.now();
+    const preBeats = 2;
+    const startTime = now + preBeats * beatDur + 0.3;
+    this.state.startTime = startTime;
+    this.state.endTime = startTime + melody.totalDur + 0.5;
+
+    // 预备 click
+    for (let i = preBeats; i > 0; i--) {
+      this.audio.playClick(startTime - i * beatDur, i === preBeats);
+    }
+
+    // 主 click（每拍）
+    for (let t = 0; t < melody.totalDur - 0.001; t += beatDur) {
+      const barIdx = Math.floor(t / barDur);
+      const beatInBar = Math.round((t - barIdx * barDur) / beatDur);
+      this.audio.playClick(startTime + t, beatInBar === 0);
+    }
+
+    // 旋律家模式：加背景鼓（轻）
+    if (this.role === 'melodist') {
+      const bgDrums = deriveDrumChart(melody);
+      for (const d of bgDrums) {
+        this.audio.playDrum(d.lane, startTime + d.time, 0.5, this.audio.bgDrumGain);
+      }
+    }
+
+    this.state.phase = 'playing';
+    document.getElementById('score').textContent = '0';
+  }
+
+  _prepareDrum(preset, melody) {
+    const chart = deriveDrumChart(melody);
+    const sorted = chart.slice().sort((a, b) => a.time - b.time);
+    const beatDur = melody.beatDur;
+
+    for (let i = 0; i < sorted.length; i++) {
+      let gap = beatDur * 2;
+      if (i > 0) gap = Math.min(gap, sorted[i].time - sorted[i-1].time);
+      if (i < sorted.length - 1) gap = Math.min(gap, sorted[i+1].time - sorted[i].time);
+      if (gap < 0.001) gap = beatDur;
+      sorted[i].status = 'pending';
+      sorted[i].jt = 0;
+      sorted[i].win = computeWin(beatDur, gap);
+    }
+    this.state.drumNotes = sorted;
+    this.state.melodyNotes = [];
+  }
+
+  _prepareMelody(preset, melody) {
+    const notes = deriveMelodyChart(melody).sort((a, b) => a.time - b.time);
+    const beatDur = melody.beatDur;
+
+    for (let i = 0; i < notes.length; i++) {
+      let gap = beatDur * 2;
+      if (i > 0) {
+        const d = notes[i].time - notes[i-1].time;
+        if (d > 0.001) gap = Math.min(gap, d);
+      }
+      if (i < notes.length - 1) {
+        const d = notes[i+1].time - notes[i].time;
+        if (d > 0.001) gap = Math.min(gap, d);
+      }
+      notes[i].status = 'pending';
+      notes[i].jt = 0;
+      notes[i].win = computeWin(beatDur, gap);
+    }
+    this.state.melodyNotes = notes;
+    this.state.drumNotes = [];
+  }
+
+  endGame() {
+    this.state.phase = 'result';
+    this.showResult();
+  }
+
+  /* ---------- 输入 ---------- */
+  onPointerDown(e) {
+    if (e.cancelable) e.preventDefault();
+    if (this.state.phase !== 'playing') return;
+
+    const x = e.clientX, y = e.clientY;
+    const now = this.audio.now();
+
+    if (this.role === 'drummer') {
+      const padY0 = this.H * 0.55;
+      const padY1 = this.H * 0.95;
+      if (y >= padY0 && y <= padY1) {
+        const lane = Math.floor(x / (this.W / 4));
+        if (lane >= 0 && lane < 4) {
+          this.padFlash[lane] = 1;
+          this.audio.playDrum(lane, now, 0.6);
+          this.judgeDrum(lane, now);
+        }
+      }
+    } else {
+      const instY0 = this.H * 0.85;
+      if (y >= instY0) {
+        const idx = Math.floor(x / (this.W / 5));
+        if (idx >= 0 && idx < 5) {
+          this.selectedInstrument = idx;
+          this.instFlash[idx] = 1;
+          return;
+        }
+      }
+      this.judgeMelody(now, x, y);
+    }
+  }
+
+  judgeDrum(lane, now) {
+    const elapsed = now - this.state.startTime;
+    let best = null, bestDiff = Infinity;
+
+    for (const n of this.state.drumNotes) {
+      if (n.status !== 'pending') continue;
+      if (n.lane !== lane) continue;
+      const d = Math.abs(n.time - elapsed);
+      if (d < bestDiff) { bestDiff = d; best = n; }
+    }
+
+    if (best && bestDiff <= best.win.bad) {
+      const grade = bestDiff <= best.win.perfect ? 'perfect'
+                  : bestDiff <= best.win.good ? 'good' : 'bad';
+      this.applyJudgement(best, grade, elapsed, now);
+    } else {
+      this.combo = 0;
+      this.floats.push({
+        x: this.playX, y: this.H * 0.75,
+        text: '·', color: '#8b93a5', t0: now, life: 0.3, size: 14
+      });
+    }
+  }
+
+  judgeMelody(now, x, y) {
+    const elapsed = now - this.state.startTime;
+    let best = null, bestDiff = Infinity;
+
+    for (const n of this.state.melodyNotes) {
+      if (n.status !== 'pending') continue;
+      const d = Math.abs(n.time - elapsed);
+      if (d < bestDiff) { bestDiff = d; best = n; }
+    }
+
+    const inst = INSTRUMENTS[this.selectedInstrument];
+    if (best && bestDiff <= best.win.bad) {
+      const grade = bestDiff <= best.win.perfect ? 'perfect'
+                  : bestDiff <= best.win.good ? 'good' : 'bad';
+      this.applyJudgement(best, grade, elapsed, now);
+      this.audio.playInstrument(inst.key, best.midi, now);
+    } else {
+      this.combo = 0;
+      this.audio.playInstrument(inst.key, 72, now);
+      this.floats.push({
+        x, y, text: '·', color: '#8b93a5',
+        t0: now, life: 0.3, size: 14
+      });
+    }
+  }
+
+  applyJudgement(note, grade, elapsed, now) {
+    note.status = grade;
+    note.jt = now;
+
+    let text, color, gain, size;
+    const bias = elapsed - note.time;
+
+    if (grade === 'perfect') {
+      this.combo++; gain = 100; text = 'PERFECT'; color = '#2ed573'; size = 15;
+      this.stats.perfect++;
+    } else if (grade === 'good') {
+      this.combo++; gain = 60; text = 'GOOD'; color = '#ffd93d'; size = 13;
+      this.stats.good++;
+    } else {
+      this.combo = 0; gain = 20; text = 'BAD'; color = '#ff4757'; size = 12;
+      this.stats.bad++;
+    }
+
+    if (grade !== 'bad') {
+      this.biasSum += bias;
+      this.biasCount++;
+      if (this.combo > this.maxCombo) this.maxCombo = this.combo;
+    }
+
+    this.score += gain;
+    document.getElementById('score').textContent = this.score;
+    this.lineFlash = 0.6;
+    this.shake = 0.25;
+
+    let px, py;
+    if (this.role === 'drummer') {
+      const laneH = (this.H * 0.45) / 4;
+      px = this.playX;
+      py = note.lane * laneH + laneH / 2;
+    } else {
+      px = this.playX;
+      py = this._midiY(note.midi);
+    }
+    this.floats.push({ x: px, y: py, text, color, t0: now, life: 0.6, size });
+  }
+
+  _midiY(midi) {
+    const y0 = 20;
+    const y1 = this.H * 0.55 - 20;
+    const minMidi = 60, maxMidi = 84;
+    const t = (midi - minMidi) / (maxMidi - minMidi);
+    return y1 - t * (y1 - y0);
+  }
+
+  /* ---------- 主循环 ---------- */
+  loop() {
+    const now = this.audio.now();
+    if (this.state.phase === 'playing') this.tick(now);
+    this.render(now);
+    requestAnimationFrame(this.loop);
+  }
+
+  tick(now) {
+    const elapsed = now - this.state.startTime;
+    const m = this.state.melody;
+    if (!m) return;
+
+    const beatDur = m.beatDur;
+    const meterNum = m.meterNum;
+
+    // 拍点检测
+    if (elapsed >= 0) {
+      const totalBeatIdx = Math.floor(elapsed / beatDur);
+      if (totalBeatIdx !== this._lastBeatIdx) {
+        this._lastBeatIdx = totalBeatIdx;
+      }
+    }
+
+    // 判定 note 数据源
+    const notes = this.role === 'drummer' ? this.state.drumNotes : this.state.melodyNotes;
+
+    for (const n of notes) {
+      if (n.status !== 'pending') continue;
+      if (elapsed > n.time + n.win.bad) {
+        n.status = 'miss';
+        n.jt = now;
+        this.combo = 0;
+        this.stats.miss++;
+        let px, py;
+        if (this.role === 'drummer') {
+          const laneH = (this.H * 0.45) / 4;
+          px = this.playX;
+          py = n.lane * laneH + laneH / 2;
+        } else {
+          px = this.playX;
+          py = this._midiY(n.midi);
+        }
+        this.floats.push({
+          x: px, y: py, text: '·', color: '#4a5162',
+          t0: now, life: 0.3, size: 16
+        });
+      }
+    }
+
+    // 衰减
+    for (let i = 0; i < 4; i++) this.padFlash[i] *= 0.85;
+    for (let i = 0; i < 5; i++) this.instFlash[i] *= 0.85;
+    this.lineFlash *= 0.9;
+    this.shake *= 0.85;
+    if (this.shake < 0.01) this.shake = 0;
+
+    // 结束
+    if (elapsed > m.totalDur + 0.3) this.endGame();
+  }
+
+  /* ---------- 渲染 ---------- */
+  render(now) {
+    const ctx = this.ctx;
+    ctx.fillStyle = '#06080c';
+    ctx.fillRect(0, 0, this.W, this.H);
+    if (this.state.phase === 'menu') return;
+
+    const elapsed = this.state.phase === 'playing'
+      ? now - this.state.startTime
+      : this.state.melody ? this.state.melody.totalDur : 0;
+
+    ctx.save();
+    if (this.shake > 0.01) {
+      ctx.translate((Math.random() - 0.5) * this.shake * 6,
+                    (Math.random() - 0.5) * this.shake * 6);
+    }
+
+    if (this.role === 'drummer') {
+      this.renderDrummer(ctx, elapsed, now);
+    } else {
+      this.renderMelodist(ctx, elapsed, now);
+    }
+
+    this.renderFloats(ctx, now);
+    this.renderCombo(ctx);
+
+    if (elapsed < 0) {
+      const left = Math.max(1, Math.ceil(-elapsed / this.state.melody.beatDur));
+      ctx.fillStyle = 'rgba(255,255,255,0.75)';
+      ctx.font = 'bold 26px sans-serif';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.shadowColor = '#44a3f7'; ctx.shadowBlur = 20;
+      ctx.fillText(String(left), this.W / 2, this.H * 0.75);
+      ctx.shadowBlur = 0;
+    }
+
+    ctx.restore();
+  }
+
+  /* ---------- 鼓手模式 ---------- */
+  renderDrummer(ctx, elapsed, now) {
+    const W = this.W, H = this.H;
+    const scoreH = H * 0.45;
+    const laneH = scoreH / 4;
+
+    // 轨道
+    for (let i = 0; i < 4; i++) {
+      const y = i * laneH + laneH / 2;
+      ctx.strokeStyle = 'rgba(255,255,255,0.04)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(0, y); ctx.lineTo(W, y);
+      ctx.stroke();
+
+      // lane 颜色小点
+      ctx.fillStyle = hexToRgba(DRUM_LANES[i].color, 0.25);
+      ctx.beginPath();
+      ctx.arc(10, y, 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // 判定线
+    const lineAlpha = 0.6 + this.lineFlash * 0.4;
+    ctx.strokeStyle = `rgba(78,205,196,${lineAlpha})`;
+    ctx.lineWidth = 2 + this.lineFlash * 2;
+    ctx.beginPath();
+    ctx.moveTo(this.playX, 0);
+    ctx.lineTo(this.playX, scoreH);
+    ctx.stroke();
+
+    // 音符
+    for (const n of this.state.drumNotes) {
+      const dt = n.time - elapsed;
+      if (dt < -0.4 || dt > 4) continue;
+      const x = this.playX + dt * this.pxPerSec;
+      if (x < -20 || x > W + 20) continue;
+      const y = n.lane * laneH + laneH / 2;
+
+      let col = DRUM_LANES[n.lane].color;
+      if (n.status === 'perfect') col = '#2ed573';
+      else if (n.status === 'good') col = '#ffd93d';
+      else if (n.status === 'bad') col = '#ff4757';
+      else if (n.status === 'miss') col = '#3a3f4a';
+
+      ctx.beginPath();
+      ctx.arc(x, y, 14, 0, Math.PI * 2);
+      ctx.fillStyle = col;
+      if (n.status === 'pending') {
+        ctx.shadowColor = col;
+        ctx.shadowBlur = 12;
+      }
+      ctx.fill();
+      ctx.shadowBlur = 0;
+
+      // 高光
+      if (n.status !== 'miss') {
+        ctx.beginPath();
+        ctx.arc(x - 4, y - 4, 4, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(255,255,255,0.4)';
+        ctx.fill();
+      }
+    }
+
+    // 打击垫
+    this.renderPads(ctx);
+  }
+
+  renderPads(ctx) {
+    const W = this.W, H = this.H;
+    const padY = H * 0.55;
+    const padH = H * 0.40;
+    const padW = W / 4;
+
+    for (let i = 0; i < 4; i++) {
+      const lane = DRUM_LANES[i];
+      const flash = this.padFlash[i];
+      const px = i * padW + 5;
+      const py = padY + 10;
+      const pw = padW - 10;
+      const ph = padH - 20;
+
+      const c = lane.rgb;
+      ctx.fillStyle = `rgba(${(c[0]*255)|0},${(c[1]*255)|0},${(c[2]*255)|0},${0.10 + flash * 0.55})`;
+      roundRect(ctx, px, py, pw, ph, 14);
+      ctx.fill();
+
+      ctx.strokeStyle = hexToRgba(lane.color, 0.35 + flash * 0.65);
+      ctx.lineWidth = 1.5 + flash * 3;
+      roundRect(ctx, px, py, pw, ph, 14);
+      ctx.stroke();
+
+      // 文字
+      ctx.fillStyle = flash > 0.1 ? '#fff' : hexToRgba(lane.color, 0.7);
+      ctx.font = 'bold 13px sans-serif';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(lane.label, px + pw/2, py + ph/2);
+
+      // 底部小圆点
+      ctx.fillStyle = hexToRgba(lane.color, 0.5 + flash * 0.5);
+      ctx.beginPath();
+      ctx.arc(px + pw/2, py + ph - 20, 4 + flash * 4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  /* ---------- 旋律家模式 ---------- */
+  renderMelodist(ctx, elapsed, now) {
+    const W = this.W, H = this.H;
+    const scoreH = H * 0.55;
+
+    // 音高网格线
+    const minMidi = 60, maxMidi = 84;
+    for (let midi = minMidi; midi <= maxMidi; midi += 3) {
+      const y = this._midiY(midi);
+      ctx.strokeStyle = (midi % 12 === 0) ? 'rgba(255,255,255,0.06)' : 'rgba(255,255,255,0.02)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(0, y); ctx.lineTo(W, y);
+      ctx.stroke();
+    }
+
+    // 判定线
+    const lineAlpha = 0.6 + this.lineFlash * 0.4;
+    ctx.strokeStyle = `rgba(78,205,196,${lineAlpha})`;
+    ctx.lineWidth = 2 + this.lineFlash * 2;
+    ctx.beginPath();
+    ctx.moveTo(this.playX, 0);
+    ctx.lineTo(this.playX, scoreH);
+    ctx.stroke();
+
+    // 音符
+    const inst = INSTRUMENTS[this.selectedInstrument];
+    for (const n of this.state.melodyNotes) {
+      const dt = n.time - elapsed;
+      if (dt < -0.4 || dt > 4) continue;
+      const x = this.playX + dt * this.pxPerSec;
+      if (x < -30 || x > W + 30) continue;
+      const y = this._midiY(n.midi);
+
+      let col = inst.color;
+      if (n.status === 'perfect') col = '#2ed573';
+      else if (n.status === 'good') col = '#ffd93d';
+      else if (n.status === 'bad') col = '#ff4757';
+      else if (n.status === 'miss') col = '#3a3f4a';
+
+      const w = Math.max(12, n.dur * this.pxPerSec * 0.85);
+
+      ctx.fillStyle = col;
+      if (n.status === 'pending') {
+        ctx.shadowColor = col;
+        ctx.shadowBlur = 10;
+      }
+      roundRect(ctx, x, y - 8, w, 16, 8);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    }
+
+    // 演奏区提示
+    const playY0 = H * 0.55;
+    const instY0 = H * 0.85;
+    ctx.fillStyle = 'rgba(255,255,255,0.02)';
+    ctx.fillRect(0, playY0, W, instY0 - playY0);
+    ctx.fillStyle = 'rgba(255,255,255,0.15)';
+    ctx.font = 'bold 11px sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('点击这里演奏 · ' + inst.name, W / 2, (playY0 + instY0) / 2);
+
+    // 乐器按钮
+    this.renderInstruments(ctx);
+  }
+
+  renderInstruments(ctx) {
+    const W = this.W, H = this.H;
+    const instY = H * 0.85;
+    const instH = H * 0.10;
+    const instW = W / 5;
+
+    for (let i = 0; i < 5; i++) {
+      const inst = INSTRUMENTS[i];
+      const flash = this.instFlash[i];
+      const selected = i === this.selectedInstrument;
+      const px = i * instW + 3;
+      const py = instY + 5;
+      const pw = instW - 6;
+      const ph = instH - 10;
+
+      const c = inst.rgb;
+      if (selected) {
+        ctx.fillStyle = `rgba(${(c[0]*255)|0},${(c[1]*255)|0},${(c[2]*255)|0},0.9)`;
+      } else {
+        ctx.fillStyle = `rgba(255,255,255,${0.06 + flash * 0.2})`;
+      }
+      roundRect(ctx, px, py, pw, ph, 10);
+      ctx.fill();
+
+      ctx.strokeStyle = selected
+        ? hexToRgba(inst.color, 1)
+        : hexToRgba(inst.color, 0.3);
+      ctx.lineWidth = 1.5;
+      roundRect(ctx, px, py, pw, ph, 10);
+      ctx.stroke();
+
+      ctx.fillStyle = selected ? '#051018' : 'rgba(255,255,255,0.75)';
+      ctx.font = 'bold 12px sans-serif';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(inst.name, px + pw/2, py + ph/2);
+    }
+  }
+
+  /* ---------- 通用渲染 ---------- */
+  renderFloats(ctx, now) {
+    for (let i = this.floats.length - 1; i >= 0; i--) {
+      const f = this.floats[i];
+      const age = now - f.t0;
+      if (age > f.life) { this.floats.splice(i, 1); continue; }
+      const p = age / f.life;
+      ctx.globalAlpha = Math.max(0, 1 - p * p);
+      ctx.fillStyle = f.color;
+      ctx.font = `bold ${f.size}px sans-serif`;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.shadowColor = f.color; ctx.shadowBlur = 12;
+      ctx.fillText(f.text, f.x, f.y - 30 * p);
+      ctx.shadowBlur = 0;
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  renderCombo(ctx) {
+    if (this.combo < 2) return;
+    ctx.save();
+    ctx.translate(this.W / 2, 70);
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.shadowColor = 'rgba(100,200,255,0.8)';
+    ctx.shadowBlur = 18;
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 36px sans-serif';
+    ctx.fillText(String(this.combo), 0, 0);
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = 'rgba(255,255,255,0.4)';
+    ctx.font = 'bold 9px sans-serif';
+    ctx.fillText('COMBO', 0, 22);
+    ctx.restore();
+  }
+
+  /* ---------- 结算 ---------- */
+  showResult() {
+    const s = this.stats;
+    document.getElementById('rScore').textContent = this.score;
+    document.getElementById('rCombo').textContent = this.maxCombo;
+    document.getElementById('rPerfect').textContent = s.perfect;
+    document.getElementById('rGood').textContent = s.good;
+    document.getElementById('rBad').textContent = s.bad;
+    document.getElementById('rMiss').textContent = s.miss;
+
+    const total = s.perfect + s.good + s.bad + s.miss;
+    const acc = total ? Math.round((s.perfect * 100 + s.good * 60 + s.bad * 20) / total) : 0;
+    let sub = '继续加油';
+    if (acc >= 95) sub = '完美演奏！';
+    else if (acc >= 80) sub = '很稳';
+    else if (acc >= 60) sub = '渐入佳境';
+    document.getElementById('resultSub').textContent = sub;
+  }
+}
+
+/* ============================================================
+   UI 绑定
+   ============================================================ */
+const game = new RhythmGame();
+const menu = document.getElementById('menu');
+const result = document.getElementById('result');
+const hud = document.getElementById('hud');
+const stopBtn = document.getElementById('stopBtn');
+const hintText = document.getElementById('hintText');
+
+let selectedPreset = null;
+let selectedRole = 'drummer';
+let speedFactor = 1.0;
+
+function buildPresets() {
+  const grid = document.getElementById('presetGrid');
+  grid.innerHTML = '';
+  PRESETS.forEach(p => {
+    const div = document.createElement('div');
+    div.className = 'preset';
+    div.innerHTML = `<div class="n">${p.name}</div><div class="m">${p.desc}</div>`;
+    div.addEventListener('click', () => {
+      document.querySelectorAll('.preset').forEach(x => x.classList.remove('on'));
+      div.classList.add('on');
+      selectedPreset = p;
+      p._baseABC = null;
+      previewChain(p, speedFactor);
+    });
+    grid.appendChild(div);
+  });
+}
+
+function previewChain(p, factor) {
+  const bpm = Math.round(p.bpm * factor);
+  let abc;
+  if (p._baseABC) {
+    abc = p._baseABC.replace(/Q:1\/\d+=\d+/, `Q:1/4=${bpm}`);
+  } else {
+    p._baseABC = paramsToABC({ ...p, bpm: p.bpm });
+    abc = p._baseABC.replace(/Q:1\/\d+=\d+/, `Q:1/4=${bpm}`);
+  }
+  const melody = parseABC(abc);
+  p._cachedMelody = melody;
+  document.getElementById('speedNote').textContent =
+    '实际 BPM ' + bpm + ' · 每拍 ' + Math.round(melody.beatDur * 1000) + 'ms · ' + melody.totalDur.toFixed(1) + 's';
+}
+
+document.querySelectorAll('.role').forEach(r => {
+  r.addEventListener('click', () => {
+    document.querySelectorAll('.role').forEach(x => x.classList.remove('on'));
+    r.classList.add('on');
+    selectedRole = r.dataset.role;
+    hintText.textContent = selectedRole === 'drummer'
+      ? 'click 是节拍参考 · 敲 4 个打击垫'
+      : 'click 是节拍参考 · 点屏幕演奏 · 底部切换乐器';
+  });
+});
+
+const speedInput = document.getElementById('speedFactor');
+const speedVal = document.getElementById('speedFactorVal');
+speedInput.addEventListener('input', () => {
+  speedFactor = +speedInput.value / 100;
+  speedVal.textContent = speedFactor.toFixed(2) + '×';
+  if (selectedPreset) previewChain(selectedPreset, speedFactor);
+});
+
+document.getElementById('startBtn').addEventListener('click', () => {
+  if (!selectedPreset) { alert('请先选一个曲目'); return; }
+  game.role = selectedRole;
+  game.resize();
+  game.start(selectedPreset);
+  menu.classList.add('hidden');
+  hud.style.display = '';
+  stopBtn.classList.add('show');
+});
+
+stopBtn.addEventListener('click', () => game.endGame());
+
+document.getElementById('againBtn').addEventListener('click', () => {
+  result.classList.add('hidden');
+  if (selectedPreset) {
+    selectedPreset._baseABC = null;
+    previewChain(selectedPreset, speedFactor);
+    game.start(selectedPreset);
+    hud.style.display = '';
+    stopBtn.classList.add('show');
+  }
+});
+
+document.getElementById('backBtn').addEventListener('click', () => {
+  result.classList.add('hidden');
+  menu.classList.remove('hidden');
+  hud.style.display = 'none';
+  stopBtn.classList.remove('show');
+});
+
+buildPresets();
+</script>
+</body>
+</html>
