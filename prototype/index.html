@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#0A0C10">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>O My Beat</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<canvas id="stage"></canvas>
+
+<div class="hud" id="hud">
+  <div class="hud-score">
+    <b id="hudScore">0</b>
+    <span>SCORE</span>
+  </div>
+</div>
+<button class="icon-btn pause-btn" id="pauseBtn" aria-label="暂停">
+  <svg viewBox="0 0 24 24"><path d="M9 5v14M15 5v14"/></svg>
+</button>
+
+<div class="combo" id="combo"><b id="comboNum">0</b><span>COMBO</span></div>
+<div class="judge-flash" id="judgeFlash"></div>
+
+<div class="countdown" id="countdown"><b id="countNum">4</b></div>
+
+<!-- ================= 首页 ================= -->
+<section class="screen" id="screenHome">
+  <header class="brand">
+    <div class="brand-mark">O</div>
+    <div class="brand-text">
+      <h1>O MY BEAT</h1>
+      <p>节奏练习 · 音感训练</p>
+    </div>
+  </header>
+
+  <div class="block">
+    <div class="block-head"><h2>模式</h2></div>
+    <div class="mode-row" id="modeRow">
+      <button class="mode-card on" data-mode="drummer">
+        <span class="mode-ico">
+          <svg viewBox="0 0 32 32"><rect x="5" y="12" width="3.5" height="10" rx="1.6"/><rect x="11.5" y="7" width="3.5" height="15" rx="1.6"/><rect x="18" y="10" width="3.5" height="12" rx="1.6"/><rect x="24.5" y="14" width="3.5" height="8" rx="1.6"/></svg>
+        </span>
+        <b>鼓手</b>
+        <em>4 轨 · 练节奏</em>
+      </button>
+      <button class="mode-card" data-mode="melodist">
+        <span class="mode-ico">
+          <svg viewBox="0 0 32 32"><circle cx="8" cy="21" r="2.6"/><circle cx="15" cy="13" r="2.6"/><circle cx="22" cy="18" r="2.6"/><circle cx="28" cy="9" r="2.2"/><path d="M8 21V11l14-4v10" fill="none" stroke-width="1.6"/></svg>
+        </span>
+        <b>旋律家</b>
+        <em>双轨 · 练音感</em>
+      </button>
+    </div>
+  </div>
+
+  <div class="block">
+    <div class="block-head"><h2>曲目</h2><span class="hint" id="songHint">16 小节</span></div>
+    <div class="song-list" id="songList"></div>
+  </div>
+
+  <div class="block">
+    <div class="block-head"><h2>难度</h2></div>
+    <div class="seg" id="diffSeg">
+      <button data-d="casual">入门</button>
+      <button data-d="normal" class="on">熟练</button>
+      <button data-d="strict">挑战</button>
+    </div>
+    <p class="seg-note" id="diffNote"></p>
+  </div>
+
+  <button class="primary" id="startBtn">开始演奏</button>
+  <p class="foot">跟着拍子敲准就好 · 没有失败</p>
+
+  <button class="gear" id="settingsBtn" aria-label="设置">
+    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.8v2.6M12 18.6v2.6M3.4 12h2.6M18 12h2.6M5.9 5.9l1.9 1.9M16.2 16.2l1.9 1.9M18.1 5.9l-1.9 1.9M7.8 16.2l-1.9 1.9"/></svg>
+  </button>
+</section>
+
+<!-- ================= 设置 ================= -->
+<div class="backdrop" id="backdrop"></div>
+<section class="sheet" id="sheet">
+  <div class="sheet-handle"></div>
+  <div class="sheet-head">
+    <h2>设置</h2>
+    <button class="icon-btn ghost-btn" id="sheetClose" aria-label="关闭">
+      <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
+    </button>
+  </div>
+
+  <div class="row">
+    <div class="row-label"><b>音符速度</b><em>越大越快</em></div>
+    <div class="row-ctrl">
+      <input type="range" id="speedRange" min="1.2" max="2.5" step="0.1" value="1.8">
+      <span class="val" id="speedVal">1.8s</span>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="row-label"><b>判定偏移</b><em>偏早为负</em></div>
+    <div class="row-ctrl">
+      <input type="range" id="offsetRange" min="-150" max="150" step="5" value="0">
+      <span class="val" id="offsetVal">0ms</span>
+    </div>
+  </div>
+
+  <div class="row toggle-row">
+    <div class="row-label"><b>PAD 轨</b><em>关闭后只剩旋律</em></div>
+    <button class="switch on" id="padSwitch" data-key="padOn"><span></span></button>
+  </div>
+
+  <div class="row toggle-row">
+    <div class="row-label"><b>音高判定</b><em>关闭后退化为纯节奏</em></div>
+    <button class="switch on" id="pitchSwitch" data-key="pitchJudge"><span></span></button>
+  </div>
+
+  <div class="row toggle-row">
+    <div class="row-label"><b>音效</b><em>击打音与伴奏</em></div>
+    <button class="switch on" id="soundSwitch" data-key="sound"><span></span></button>
+  </div>
+
+  <p class="sheet-foot">改动即时生效，下一次演奏应用</p>
+</section>
+
+<!-- ================= 暂停 ================= -->
+<div class="modal" id="pauseModal">
+  <div class="modal-panel">
+    <h2>已暂停</h2>
+    <button class="primary" id="resumeBtn">继续</button>
+    <button class="ghost" id="quitBtn">结束本局</button>
+  </div>
+</div>
+
+<!-- ================= 结算 ================= -->
+<section class="screen result" id="screenResult">
+  <div class="grade" id="gradeLetter">A</div>
+  <p class="grade-sub" id="gradeSub"></p>
+
+  <div class="stats" id="statsRow">
+    <div class="stat"><b id="rScore">0</b><span>得分</span></div>
+    <div class="stat"><b id="rCombo">0</b><span>最大连击</span></div>
+  </div>
+
+  <div class="metrics" id="metrics"></div>
+
+  <div class="histo-wrap">
+    <div class="histo-title"><span>偏早</span><span>命中分布</span><span>偏慢</span></div>
+    <div class="histo" id="histo"></div>
+  </div>
+
+  <p class="diag" id="diag"></p>
+
+  <button class="primary" id="againBtn">再来一次</button>
+  <button class="ghost" id="homeBtn">返回首页</button>
+</section>
+
+<script src="app.js"></script>
+</body>
+</html>
