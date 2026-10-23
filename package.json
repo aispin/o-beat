@@ -1,0 +1,17 @@
+{
+  "name": "o-beat",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@12.14.0",
+  "scripts": {
+    "dev": "pnpm --filter @o-beat/pwa dev",
+    "build": "pnpm --filter @o-beat/pwa build",
+    "preview": "pnpm --filter @o-beat/pwa preview",
+    "build:gh": "pnpm --filter @o-beat/pwa build:gh",
+    "typecheck": "pnpm --filter @o-beat/pwa typecheck",
+    "lint": "pnpm --filter @o-beat/pwa lint"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2"
+  }
+}

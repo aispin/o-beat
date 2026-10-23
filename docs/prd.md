@@ -1,10 +1,16 @@
 # O My Beat · PRD v1
 
-> 产品目标：**可玩性高、能解压、能练「节奏感」与「音感」** 的竖屏小程序音乐游戏。
-> 本文是设计与数值的唯一依据；`prototype/` 是交互与视觉的唯一依据。
+> 产品目标：**可玩性高、能解压、能练「节奏感」与「音感」** 的竖屏音乐游戏。
+> 交付形态：PWA（`apps/pwa`），后续出微信小程序版。
+> 本文是设计与数值的唯一依据；`apps/pwa/` 是交互与视觉的唯一依据。
 
-版本：v1.4 · 2026-10-23
+版本：v1.5 · 2026-10-24
 
+> v1.5 变更：原型转为正式产品，仓库改 pnpm workspace monorepo，产品在 `apps/pwa`
+> （React 19 + Vite 8 + Tailwind v4 + shadcn/ui + TS，引擎保持原生 JS）。
+> 新增 PWA 交付形态与版本发现/更新提示（15.0）；15 节改为工程结构真源，
+> `prototype/` 冻结。玩法与数值无变化。
+>
 > v1.4 变更：节奏模式不再选曲目，改为选**风格 + BPM**（Straight / Swing / Bossa Nova /
 > Math Rock，风格绑定拍号、缺省 BPM、重音轮廓、场景与主题色）；三档生成规则重写为
 > 等分铺底 / 拆附点 / 更杂乱且贴风格（见 7.3）；一局固定 48 小节，每 16 小节 +10 BPM；
@@ -641,25 +647,51 @@ v1 原型先不做，接口预留（`chartSeed` 参数）。
 
 ---
 
-## 15. 原型规格（真源声明）
+## 15. 工程结构（真源声明）
 
-> **`prototype/` 是交互与视觉的唯一真源。**
-> 后续小程序实现必须对齐：布局常量、颜色、动效曲线、判定数值、文案。
-> 若小程序需要偏离，先改原型，再抄。
+> **`apps/pwa/` 是交互与视觉的唯一真源。**
+> 小程序实现必须对齐：布局常量、颜色、动效曲线、判定数值、文案。
+> 偏离前先改 PWA，再抄。
+>
+> `prototype/` 已冻结。它是 PWA 迁移前的单文件原型，只用于视觉对照与历史回溯，
+> **不再接受功能改动**。
 
-| 文件 | 职责 |
+仓库是 pnpm workspace monorepo：
+
+| 路径 | 职责 |
 |---|---|
-| `prototype/index.html` | 结构：首页 / 演奏 / 结算 / 设置 / 道具层 |
-| `prototype/style.css` | 视觉：色板、字号、圆角、过渡、场景换肤变量 |
-| `prototype/app.js` | 逻辑：谱面生成、判定、渲染、场景驱动、设置 |
-| `prototype/sfx.js` | 音频引擎：混音台 / 卷积混响 / 采样 / 物理建模 / 程序化音效 |
-| `prototype/backing.js` | 编曲层：按 GROOVE 生成 L0 伴奏事件并调度；`buildRhythm()` 只出节拍器 + 首拍底鼓 |
-| `prototype/scene.js` | 场景：WebGL 引擎 + 4 套 GLSL 氛围 |
-| `prototype/assets/` | 采样：钢琴 8 锚点 + 鼓组 3 套 × 4 件（312KB） |
+| `apps/pwa/src/engine/game.js` | 逻辑：谱面生成、判定、渲染、场景驱动、快照广播 |
+| `apps/pwa/src/engine/sfx.js` | 音频引擎：混音台 / 卷积混响 / 采样 / 物理建模 / 程序化音效 |
+| `apps/pwa/src/engine/backing.js` | 编曲层：按 GROOVE 生成 L0 伴奏事件并调度；`buildRhythm()` 只出节拍器 + 首拍底鼓 |
+| `apps/pwa/src/engine/scene.js` | 场景：WebGL 引擎 + 4 套 GLSL 氛围 |
+| `apps/pwa/src/engine/index.ts` | 引擎门面：唯一的类型边界，导出快照类型与命令 |
+| `apps/pwa/src/components/` | 界面：首页 / 演奏 HUD / 结算 / 设置 / 暂停 / 更新提示 |
+| `apps/pwa/src/components/ui/` | shadcn 组件（源码在仓库里，按 spec-ui.md 的变体规则扩展） |
+| `apps/pwa/src/index.css` | 令牌 → 语义层 → 工具类，Tailwind v4 CSS-first |
+| `apps/pwa/public/assets/` | 采样：钢琴 8 锚点 + 鼓组 3 套 × 4 件（312KB，进 precache） |
+| `prototype/` | **冻结**：迁移前的单文件原型 |
 
 顶部 `CFG` 对象集中所有可调数值，改玩法不改逻辑。
-`app.js` 与音频之间只隔一层 `AudioEng` 适配器——
+`game.js` 与音频之间只隔一层 `AudioEng` 适配器——
 小程序阶段把 `AudioEng` 换成 `WebAudioContext` 实现即可，玩法代码零改动。
+
+**引擎与界面只通过快照通信。** 引擎不认识 React：
+状态变化时 `emit()` 出一个新快照对象，界面用 `useSyncExternalStore` 订阅；
+界面只调命令（`setMode` / `setStyle` / `start` / `pause` …），不读引擎内部状态。
+这条窄接口是"引擎用原生 JS、界面用框架"能成立的前提。
+
+---
+
+## 15.0 PWA 交付形态
+
+| 项 | 规定 |
+|---|---|
+| 安装 | `manifest.webmanifest` + 三档图标（192 / 512 / 512 maskable）+ 竖屏 standalone |
+| 离线 | 应用外壳与采样全部进 precache（约 848KB），断网可完整游玩 |
+| 更新 | `registerType: 'prompt'`，**禁止 autoUpdate**——演奏中被强刷是最糟的体验 |
+| 版本 | 每次构建产出 `version.json`（`version` / `buildId` / `time`），不进 precache |
+| 提示 | 三条信号（SW `needRefresh` / `version.json` 比对 / 手动检查）合成一个开关；演奏中不弹，回首页再出现 |
+| 可见性 | 设置页常驻版本号与构建时间，可手动检查更新 |
 
 ---
 

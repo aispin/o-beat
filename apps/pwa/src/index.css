@@ -1,0 +1,368 @@
+/* ============================================================
+   O My Beat · 样式入口
+   ------------------------------------------------------------
+   遵循 spec-ui.md：
+   - Tailwind v4 CSS-first，不用 tailwind.config.js
+   - preflight 用 scoped 版本，只作用于 .tw-root，不污染 canvas 层之外的第三方结构
+   - 颜色一律走语义变量 → @theme inline 桥接，工具类里不出现裸色值
+   - 自研 CSS 只写组件层做不出来的东西（品牌渐变、辉光、安全区、画布层）
+
+   分层（z 轴）：
+     0  gl-bg   WebGL 场景
+     1  props   SVG 剪影 / 压暗
+     2  stage   游戏画布（透明）
+     5+ UI
+   ============================================================ */
+
+@layer vendor, theme, base, components, utilities, overrides;
+
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities" layer(utilities);
+
+@plugin "tailwindcss-scoped-preflight" {
+  isolation-strategy: inside;
+  selector: .tw-root;
+}
+
+/* ---------------- 设计令牌 ---------------- */
+@layer base {
+  :root {
+    --bg: #07090d;
+
+    --surface: rgba(18, 22, 30, 0.8);
+    --surface-2: rgba(32, 38, 50, 0.92);
+    --line: rgba(255, 255, 255, 0.085);
+    --line-strong: rgba(255, 255, 255, 0.16);
+
+    --text: #f2f5fa;
+    --muted: #98a0b0;
+    --dim: #626b7d;
+
+    --kick: #5b8cff;
+    --snare: #ff7a59;
+    --ch: #35d0ba;
+    --oh: #c084fc;
+    --pad: #35d0ba;
+    --melody: #ffc94d;
+
+    --perfect: #4ade80;
+    --great: #ffc94d;
+    --good: #60a5fa;
+    --miss: #4b5563;
+
+    /* 由场景注入，切场景整体换色 */
+    --accent-a: #35d0ba;
+    --accent-b: #5b8cff;
+    --accent-rgb: 53, 208, 186;
+    --accent-b-rgb: 91, 140, 255;
+    --accent-glow: rgba(53, 208, 186, 0.45);
+
+    --r-sm: 10px;
+    --r-md: 14px;
+    --r-lg: 20px;
+    --r-xl: 26px;
+
+    --ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+
+    /* shadcn 语义层：全部指向上面的调色板，只有这一个方向 */
+    --background: var(--bg);
+    --foreground: var(--text);
+    --card: var(--surface);
+    --card-foreground: var(--text);
+    --popover: var(--surface-2);
+    --popover-foreground: var(--text);
+    --primary: var(--accent-a);
+    --primary-foreground: #07090d;
+    --secondary: rgba(255, 255, 255, 0.08);
+    --secondary-foreground: var(--text);
+    --muted-bg: rgba(255, 255, 255, 0.06);
+    --muted-foreground: var(--muted);
+    --accent: rgba(255, 255, 255, 0.06);
+    --accent-foreground: var(--text);
+    --destructive: #ff5a52;
+    --destructive-foreground: #fff;
+    --border: var(--line);
+    --input: var(--line);
+    --ring: var(--accent-a);
+    --radius: var(--r-md);
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family:
+      -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", "Microsoft YaHei",
+      sans-serif;
+    -webkit-font-smoothing: antialiased;
+    overscroll-behavior: none;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+    -webkit-user-select: none;
+    overflow: hidden;
+  }
+
+  /* Tailwind v4 把 button 的 cursor 改成了 default，这里补回交互语义 */
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+  button:disabled {
+    cursor: not-allowed;
+  }
+}
+
+/* ---------------- 语义 → 工具类 ---------------- */
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted-bg);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-line-strong: var(--line-strong);
+
+  --color-brand: var(--accent-a);
+  --color-brand-2: var(--accent-b);
+  --color-text-dim: var(--dim);
+  --color-perfect: var(--perfect);
+  --color-great: var(--great);
+  --color-good: var(--good);
+  --color-miss: var(--miss);
+
+  --radius-sm: var(--r-sm);
+  --radius-md: var(--r-md);
+  --radius-lg: var(--r-lg);
+  --radius-xl: var(--r-xl);
+}
+
+/* ---------------- 画布层 ---------------- */
+@layer components {
+  .app-shell {
+    position: fixed;
+    inset: 0;
+    overflow: hidden;
+    background: var(--bg);
+    transition: background-color 0.6s var(--ease);
+  }
+
+  .gl-bg {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    display: block;
+    width: 100%;
+    height: 100%;
+    transition: opacity 0.45s var(--ease);
+  }
+
+  .app-shell[data-scene-off="true"] .gl-bg {
+    opacity: 0;
+  }
+
+  .prop-layer {
+    position: fixed;
+    inset: 0;
+    z-index: 1;
+    overflow: hidden;
+    pointer-events: none;
+  }
+
+  .stage {
+    position: fixed;
+    inset: 0;
+    z-index: 2;
+    display: block;
+    width: 100%;
+    height: 100%;
+    touch-action: none;
+  }
+
+  .veil {
+    position: fixed;
+    inset: 0;
+    z-index: 1;
+    pointer-events: none;
+    background: radial-gradient(
+      120% 80% at 50% 110%,
+      rgba(0, 0, 0, 0) 40%,
+      rgba(0, 0, 0, 0.32) 100%
+    );
+  }
+
+  /* 品牌渐变：主按钮、Logo、选中态的高光都来自这两个变量。
+     方向固定 a → b（左上起），换场景只换色不改方向。 */
+  .brand-fill {
+    background-image: linear-gradient(140deg, var(--accent-a) 0%, var(--accent-b) 100%);
+  }
+
+  .brand-glow {
+    box-shadow: 0 10px 30px -10px var(--accent-glow);
+  }
+
+  .brand-text {
+    color: var(--accent-a);
+  }
+
+  /* 玻璃面板：首页卡片、设置行、结算卡都用它 */
+  .glass {
+    background-color: var(--surface);
+    border: 1px solid var(--line);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07);
+    backdrop-filter: blur(14px) saturate(1.1);
+    -webkit-backdrop-filter: blur(14px) saturate(1.1);
+  }
+
+  .glass-on {
+    border-color: color-mix(in srgb, var(--accent-a) 55%, transparent);
+    background-color: color-mix(in srgb, var(--accent-a) 12%, var(--surface));
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.08),
+      0 8px 24px -14px var(--accent-glow);
+  }
+
+  /* 首页滚动区：底部给 CTA 让位，顶部避开刘海 */
+  .home-scroll {
+    position: relative;
+    z-index: 5;
+    height: 100%;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: calc(env(safe-area-inset-top, 0px) + 16px) 16px
+      calc(env(safe-area-inset-bottom, 0px) + 108px);
+    scrollbar-width: none;
+  }
+
+  .home-scroll::-webkit-scrollbar {
+    display: none;
+  }
+
+  .cta-dock {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 6;
+    padding: 12px 16px calc(env(safe-area-inset-bottom, 0px) + 14px);
+    background: linear-gradient(to top, rgba(7, 9, 13, 0.94) 30%, rgba(7, 9, 13, 0));
+  }
+
+  /* 判定线闪光：一次 60ms 的整屏提亮，用 key 重新挂载来重放 */
+  .judge-flash {
+    position: fixed;
+    inset: 0;
+    z-index: 4;
+    pointer-events: none;
+    opacity: 0;
+  }
+
+  .judge-flash-on {
+    animation: judge-flash 0.14s var(--ease);
+  }
+
+  /* 连击数字：每次加分重新挂载，动画自然重放 */
+  .combo-pop {
+    animation: combo-pop 0.22s var(--ease);
+  }
+
+  .countdown-num {
+    animation: countdown-num 0.6s var(--ease);
+  }
+
+  .bpm-pulse {
+    animation: bpm-pulse 0.5s var(--ease);
+  }
+
+  .sheet-panel {
+    animation: sheet-in 0.26s var(--ease);
+  }
+
+  .tabnum {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@keyframes judge-flash {
+  0% {
+    opacity: 0.16;
+    background: radial-gradient(60% 40% at 50% 78%, var(--accent-a) 0%, transparent 70%);
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes combo-pop {
+  0% {
+    transform: scale(1.18);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes countdown-num {
+  0% {
+    transform: scale(1.35);
+    opacity: 0;
+  }
+  30% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(0.94);
+    opacity: 0.6;
+  }
+}
+
+@keyframes bpm-pulse {
+  0% {
+    opacity: 0.35;
+    transform: translateY(-1px);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes sheet-in {
+  0% {
+    transform: translateY(18px);
+    opacity: 0;
+  }
+  100% {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .judge-flash-on,
+  .combo-pop,
+  .countdown-num,
+  .bpm-pulse,
+  .sheet-panel {
+    animation: none;
+  }
+}

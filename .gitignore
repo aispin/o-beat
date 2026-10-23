@@ -2,3 +2,9 @@
 node_modules/
 .workbuddy/
 *.log
+
+# 构建产物：dist 只进 gh-pages 分支，不进主分支
+apps/pwa/dist/
+apps/pwa/dev-dist/
+*.tsbuildinfo
+.vite/
