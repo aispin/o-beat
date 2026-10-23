@@ -25,13 +25,21 @@ const PAD_COLOR = '#35D0BA';
 const MEL_COLOR = '#FFC94D';
 const GRADE_COLOR = { perfect: '#4ADE80', great: '#FFC94D', good: '#60A5FA', miss: '#4B5563' };
 
+/* 场景：一套 shader + 一套 UI 强调色，切歌时整体换肤 */
+const SCENES = {
+  cyber:   { label: '赛博朋克', a: '#FF3FA4', b: '#35E0FF', glow: 'rgba(255,63,164,0.42)' },
+  classic: { label: '音乐家的房间', a: '#FFB259', b: '#E0762F', glow: 'rgba(255,178,89,0.40)' },
+  lofi:    { label: '慵懒房间', a: '#FFB066', b: '#7D9BC4', glow: 'rgba(255,176,102,0.36)' },
+  rock:    { label: 'Live 舞台', a: '#FF4A3D', b: '#FFC98A', glow: 'rgba(255,74,61,0.44)' },
+};
+
 const SONGS = [
-  { id: 'steady', name: '匀速', tag: '正拍稳定', bpm: 75, meter: 4, root: 72, scale: 'maj', chords: ['C', 'Am', 'F', 'G'] },
-  { id: 'sync',   name: '反拍', tag: '切分入门', bpm: 80, meter: 4, root: 67, scale: 'maj', chords: ['G', 'D', 'Em', 'C'] },
-  { id: 'waltz',  name: '三拍', tag: '三拍重心', bpm: 72, meter: 3, root: 65, scale: 'maj', chords: ['F', 'C', 'F', 'C'] },
-  { id: 'breath', name: '长呼吸', tag: '长音耐心', bpm: 65, meter: 4, root: 69, scale: 'min', chords: ['Am', 'F', 'C', 'G'] },
-  { id: 'penta',  name: '五声', tag: '音感入门', bpm: 70, meter: 4, root: 74, scale: 'maj', chords: ['D', 'G', 'A', 'D'] },
-  { id: 'groove', name: '切分', tag: '切分进阶', bpm: 85, meter: 4, root: 72, scale: 'maj', chords: ['C', 'F', 'G', 'Am'] },
+  { id: 'neon',  name: '霓虹脉冲', tag: '电子 · 正拍', scene: 'cyber',   bpm: 84, meter: 4, root: 72, scale: 'maj', chords: ['C', 'Am', 'F', 'G'] },
+  { id: 'city',  name: '城市夜行', tag: '电子 · 切分', scene: 'cyber',   bpm: 96, meter: 4, root: 67, scale: 'maj', chords: ['G', 'D', 'Em', 'C'] },
+  { id: 'waltz', name: '月下圆舞', tag: '古典 · 三拍', scene: 'classic', bpm: 72, meter: 3, root: 65, scale: 'maj', chords: ['F', 'C', 'F', 'C'] },
+  { id: 'breath',name: '长呼吸',   tag: '慵懒 · 长音', scene: 'lofi',    bpm: 64, meter: 4, root: 69, scale: 'min', chords: ['Am', 'F', 'C', 'G'] },
+  { id: 'rain',  name: '雨窗午后', tag: '慵懒 · 五声', scene: 'lofi',    bpm: 68, meter: 4, root: 74, scale: 'maj', chords: ['D', 'G', 'A', 'D'] },
+  { id: 'live',  name: '地下现场', tag: '摇滚 · 强拍', scene: 'rock',    bpm: 88, meter: 4, root: 72, scale: 'maj', chords: ['C', 'F', 'G', 'Am'] },
 ];
 
 const NOTE_SEMI = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
@@ -100,10 +108,11 @@ const S = {
   press: {},
   lastBeat: -1,
   beatPulse: 0,
+  energy: 0,
+  dim: 0,
+  zoneAmt: 0,
   bgHue: 200,
   bgTarget: 200,
-  bgCache: null,
-  bgKey: '',
 };
 
 const settings = Object.assign({
@@ -112,6 +121,7 @@ const settings = Object.assign({
   padOn: true,
   pitchJudge: true,
   sound: true,
+  sceneOn: true,
 }, JSON.parse(localStorage.getItem('omb.settings') || '{}'));
 
 function saveSettings() {
@@ -479,26 +489,8 @@ function resize() {
   canvas.style.width = view.w + 'px';
   canvas.style.height = view.h + 'px';
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  S.bgCache = null;
+  if (window.Scene) Scene.resize();
   computeLayout();
-}
-
-function drawBackground() {
-  const L = S.layout, c = ctx;
-  const key = S.bgHue.toFixed(0) + ':' + L.W + 'x' + L.H;
-  if (S.bgCache && S.bgKey === key) {
-    c.fillStyle = S.bgCache;
-    c.fillRect(0, 0, L.W, L.H);
-    return;
-  }
-  const g = c.createRadialGradient(L.W * 0.5, L.H * 0.22, 0, L.W * 0.5, L.H * 0.22, L.H * 0.95);
-  g.addColorStop(0, 'hsla(' + S.bgHue + ',38%,13%,1)');
-  g.addColorStop(0.55, 'hsla(' + (S.bgHue + 20) + ',30%,8%,1)');
-  g.addColorStop(1, '#07090D');
-  S.bgCache = g;
-  S.bgKey = key;
-  c.fillStyle = g;
-  c.fillRect(0, 0, L.W, L.H);
 }
 
 function drawLanes() {
@@ -575,12 +567,9 @@ function drawHitZone() {
   const L = S.layout, c = ctx;
   const zoneH = L.H - L.judgeY;
 
-  c.fillStyle = 'rgba(255,255,255,0.014)';
-  c.fillRect(0, L.judgeY, L.W, zoneH);
-
   const grad = c.createLinearGradient(0, L.judgeY, 0, L.H);
-  grad.addColorStop(0, 'rgba(53,208,186,0.16)');
-  grad.addColorStop(0.55, 'rgba(53,208,186,0.03)');
+  grad.addColorStop(0, 'rgba(53,208,186,0.07)');
+  grad.addColorStop(0.55, 'rgba(53,208,186,0.015)');
   grad.addColorStop(1, 'rgba(53,208,186,0)');
   c.fillStyle = grad;
   c.fillRect(0, L.judgeY, L.W, zoneH);
@@ -754,8 +743,7 @@ function draw() {
   if (!L) return;
   const t = elapsed();
 
-  S.bgHue += (S.bgTarget - S.bgHue) * 0.02;
-  drawBackground();
+  ctx.clearRect(0, 0, L.W, L.H);
   drawLanes();
   drawHitZone();
   drawNotes(t);
@@ -796,6 +784,7 @@ function addScore(base, x, y, grade) {
   const gain = Math.round(base * comboMult());
   S.score += gain;
   S.earned += base;
+  S.energy = Math.min(1.5, S.energy + (grade === 'perfect' ? 0.9 : 0.6));
   const el = $('#hudScore');
   el.textContent = S.score;
   el.classList.add('pop');
@@ -1028,8 +1017,56 @@ function update(t) {
   if (S.phase === 'playing' && t > S.totalDur + 0.4) endRun();
 }
 
+/* ---- 场景驱动：把节拍 / 命中 / 连击喂给 GL ---- */
+const Clock = { t0: 0 };
+
+function sceneTick() {
+  if (!window.Scene || !Scene.gl) return;
+  const now = performance.now() / 1000;
+  if (now - Scene.lastDraw < 0.032) return;
+  Scene.lastDraw = now;
+
+  const live = S.phase === 'playing' || S.phase === 'paused';
+
+  S.dim += ((live ? 1 : 0) - S.dim) * 0.09;
+  S.zoneAmt += ((S.combo >= CFG.zone ? 1 : 0) - S.zoneAmt) * 0.07;
+  S.energy *= 0.90;
+  S.bgHue += (S.bgTarget - S.bgHue) * 0.02;
+
+  if (!settings.sceneOn) return;
+
+  const t = live ? elapsed() + 6 : now - Clock.t0;
+  const beatDur = 60 / S.song.bpm;
+
+  Scene.render({
+    t: t,
+    beat: (t / beatDur) % 1,
+    bar: t / (beatDur * S.song.meter),
+    pulse: live ? S.beatPulse : (0.5 + 0.5 * Math.sin(now * 1.1)) * 0.35,
+    energy: S.energy,
+    hue: S.bgHue / 360,
+    dim: S.dim,
+    zone: S.zoneAmt,
+  });
+}
+
+function applyScene(song) {
+  const sc = SCENES[song.scene] || SCENES.lofi;
+  document.body.dataset.scene = song.scene;
+  document.body.classList.toggle('no-scene', !settings.sceneOn);
+  document.documentElement.style.setProperty('--accent-a', sc.a);
+  document.documentElement.style.setProperty('--accent-b', sc.b);
+  document.documentElement.style.setProperty('--accent-glow', sc.glow);
+  if (window.Scene && Scene.gl) {
+    Scene.canvas.style.opacity = settings.sceneOn ? '1' : '0';
+    if (settings.sceneOn) Scene.use(song.scene);
+  }
+  $('#brandScene').textContent = sc.label;
+}
+
 function loop() {
   requestAnimationFrame(loop);
+  sceneTick();
   if (S.phase === 'home') return;
 
   if (S.phase === 'playing') {
@@ -1107,6 +1144,7 @@ function endRun() {
   if (S.phase === 'result') return;
   S.phase = 'result';
   Backing.stop();
+  ctx.clearRect(0, 0, view.w, view.h);
   document.body.classList.remove('ingame');
   document.body.classList.remove('zone');
 
@@ -1178,7 +1216,8 @@ function showScreen(id) {
 
 function renderSongs() {
   $('#songList').innerHTML = SONGS.map((s) => (
-    '<button class="song' + (s.id === S.song.id ? ' on' : '') + '" data-id="' + s.id + '">' +
+    '<button class="song' + (s.id === S.song.id ? ' on' : '') + '" data-id="' + s.id + '"' +
+    ' style="--accent:' + (SCENES[s.scene] || SCENES.lofi).a + '">' +
     '<span class="dot"></span><b>' + s.name + '</b><span>' + s.tag + '</span>' +
     '<em>' + s.bpm + ' BPM · ' + s.meter + '/4</em></button>'
   )).join('');
@@ -1188,6 +1227,7 @@ function renderSongs() {
       $$('#songList .song').forEach((x) => x.classList.remove('on'));
       el.classList.add('on');
       $('#songHint').textContent = Math.round(CFG.bars * S.song.meter * 60 / S.song.bpm) + ' 秒';
+      applyScene(S.song);
     });
   });
 }
@@ -1246,7 +1286,7 @@ function bindUI() {
     saveSettings();
   });
 
-  [['padSwitch', 'padOn'], ['pitchSwitch', 'pitchJudge'], ['soundSwitch', 'sound']].forEach(([id, key]) => {
+  [['padSwitch', 'padOn'], ['pitchSwitch', 'pitchJudge'], ['sceneSwitch', 'sceneOn'], ['soundSwitch', 'sound']].forEach(([id, key]) => {
     const el = $('#' + id);
     el.classList.toggle('on', !!settings[key]);
     el.addEventListener('click', () => {
@@ -1254,6 +1294,7 @@ function bindUI() {
       el.classList.toggle('on', settings[key]);
       saveSettings();
       if (key === 'sound') AudioEng.setMute(!settings.sound);
+      if (key === 'sceneOn') applyScene(S.song);
       if (key === 'padOn' && S.phase !== 'playing' && S.phase !== 'paused') computeLayout();
     });
   });
@@ -1287,6 +1328,7 @@ function bindUI() {
   $('#againBtn').addEventListener('click', () => { showScreen(null); startRun(); });
   $('#homeBtn').addEventListener('click', () => {
     S.phase = 'home';
+    ctx.clearRect(0, 0, view.w, view.h);
     document.body.classList.remove('ingame');
     showScreen('screenHome');
   });
@@ -1310,9 +1352,17 @@ function bindUI() {
 }
 
 /* ---------------- 启动 ---------------- */
+Clock.t0 = performance.now() / 1000;
+const glOk = window.Scene ? Scene.init($('#glbg')) : false;
+if (!glOk) {
+  document.body.classList.add('no-scene');
+  console.warn('[omb] WebGL 不可用，回退纯色背景');
+}
+
 resize();
 bindUI();
 renderSongs();
+applyScene(S.song);
 $('#sheet').classList.add('hide');
 $('#screenResult').classList.add('hide');
 $('#pauseModal').classList.add('hide');

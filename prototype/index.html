@@ -3,13 +3,55 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
-<meta name="theme-color" content="#0A0C10">
+<meta name="theme-color" content="#07090D">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <title>O My Beat</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
+<!-- L0 场景氛围（WebGL） -->
+<canvas id="glbg"></canvas>
+
+<!-- L1 道具剪影（SVG，按场景切换） -->
+<div class="props" id="props">
+  <svg class="prop prop-lofi" viewBox="0 0 390 420" preserveAspectRatio="xMidYMax meet">
+    <!-- 椅子靠背 -->
+    <rect x="255" y="215" width="86" height="205" rx="18" fill="#2C2018"/>
+    <!-- 身体：弓背，从腰到肩 -->
+    <path d="M196 330 Q186 250 214 226 Q246 200 292 212 Q332 222 338 288 L342 330 Z" fill="#1B1322"/>
+    <!-- 头发（垂到肩） -->
+    <path d="M228 246 Q210 178 262 160 Q320 142 338 196 Q346 224 330 244 Q326 204 292 196 Q248 186 228 246 Z" fill="#2C2018"/>
+    <!-- 头（低垂） -->
+    <ellipse cx="292" cy="184" rx="38" ry="42" fill="#1B1322"/>
+    <!-- 伸向桌面的手臂 -->
+    <path d="M206 268 Q168 288 130 318 L142 332 Q182 302 216 290 Z" fill="#1B1322"/>
+    <!-- 台灯 -->
+    <path d="M330 320 L344 248 L386 248 L390 320 Z" fill="#2A2036"/>
+    <rect x="360" y="212" width="6" height="40" fill="#2A2036"/>
+    <ellipse cx="363" cy="320" rx="22" ry="5" fill="#3A2C46"/>
+    <!-- 桌面（最前景） -->
+    <rect x="0" y="316" width="390" height="104" fill="#0C0812"/>
+    <rect x="0" y="309" width="390" height="9" rx="4" fill="#120D1A"/>
+  </svg>
+
+  <svg class="prop prop-classic" viewBox="0 0 200 170" preserveAspectRatio="xMidYMax meet">
+    <!-- 谱架三脚 -->
+    <path d="M100 170 L100 66" stroke="#2C2018" stroke-width="5" fill="none"/>
+    <path d="M58 170 L100 108 L142 170" stroke="#2C2018" stroke-width="5" fill="none"/>
+    <!-- 谱板 -->
+    <rect x="52" y="22" width="96" height="52" rx="5" fill="#2C2018" transform="rotate(-7 100 48)"/>
+    <!-- 谱线 -->
+    <g stroke="#6B4E2A" stroke-width="1.2" opacity="0.75" transform="rotate(-7 100 48)">
+      <path d="M66 36h68M66 42h68M66 48h68M66 54h68M66 60h68"/>
+    </g>
+  </svg>
+</div>
+
+<!-- L1.5 可读性压暗 -->
+<div class="veil" id="veil"></div>
+
+<!-- L2 游戏层 -->
 <canvas id="stage"></canvas>
 
 <div class="hud" id="hud">
@@ -35,6 +77,7 @@
       <h1>O MY BEAT</h1>
       <p>节奏练习 · 音感训练</p>
     </div>
+    <span class="brand-scene" id="brandScene"></span>
   </header>
 
   <div class="block">
@@ -118,6 +161,11 @@
   </div>
 
   <div class="row toggle-row">
+    <div class="row-label"><b>场景</b><em>随曲目自动切换</em></div>
+    <button class="switch on" id="sceneSwitch" data-key="sceneOn"><span></span></button>
+  </div>
+
+  <div class="row toggle-row">
     <div class="row-label"><b>音效</b><em>击打音与伴奏</em></div>
     <button class="switch on" id="soundSwitch" data-key="sound"><span></span></button>
   </div>
@@ -157,6 +205,7 @@
   <button class="ghost" id="homeBtn">返回首页</button>
 </section>
 
+<script src="scene.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
