@@ -138,6 +138,8 @@ export function createBgm(): BgmApi {
     const sc = state.score;
     if (!bus || !state.running || !sc) return;
     while (state.nextAt < bus.ctx.currentTime + LOOKAHEAD) {
+      /* 摇摆不在这里加：鼓与和弦是"小节起点 + 格位偏移"排出来的，
+         整格加偏移只会歪掉旋律。偏移统一在 arrange.ts 的格位时间上做。 */
       scheduleStep(bus, sc, state.step, state.nextAt);
       state.nextAt += sc.step;
       state.step = (state.step + 1) % (sc.steps * sc.bars);
