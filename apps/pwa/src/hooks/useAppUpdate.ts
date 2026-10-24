@@ -7,9 +7,9 @@ import { useRegisterSW } from 'virtual:pwa-register/react';
    3. 页面重新可见（切回来、从后台唤醒）—— 顺手再查一次，不额外花钱。
    三者统一成一个 updateReady，UI 只认这一个开关。
 
-   注意 version.json 不是到处都能拿到：WorkBuddy 的分享域名只放行 sw.js / manifest /
-   图标这几个 PWA 必需的路径，其余一律 403。所以它只能当「锦上添花」，
-   真正兜底的判断是手动检查时顺带 reg.update() 一次。 */
+   注意 version.json 在分享域名上不是默认就能拿到的：网关按 URL 上的 ?sharecode= 放行，
+   页面首次访问后虽然会种 __wb_rsc Cookie，但探针请求必须自己把 sharecode 带上
+   （见下面的 versionUrl），否则回来的是网关那张 403 的 HTML。 */
 
 const CHECK_INTERVAL = 5 * 60 * 1000; // 5 分钟
 const SW_WAIT = 3000; // 手动检查时等 SW 自报更新的上限
@@ -93,7 +93,7 @@ export function useAppUpdate(): UpdateState {
         return verdict;
       }
 
-      // version.json 拿不到（分享域名会 403）就退回到 SW：让它自己去比 sw.js
+      // 探针彻底拿不到（离线 / 网关抽风）就退回到 SW：让它自己去比 sw.js
       const reg = await navigator.serviceWorker?.getRegistration().catch(() => null);
       if (!reg) {
         if (manual) setManualResult('unknown');

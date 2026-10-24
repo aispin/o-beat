@@ -3,7 +3,7 @@ import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { VitePWA } from 'vite-plugin-pwa';
 import { execSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 const pkg = JSON.parse(readFileSync(path.resolve(import.meta.dirname, 'package.json'), 'utf8'));
@@ -37,6 +37,43 @@ const OG_IMAGE = `${CANONICAL}og.png`;
  *  发布到分享域名时把 sharecode 传进来，start_url 就会带上它。 */
 const SHARECODE = process.env.OMB_SHARECODE || '';
 const START_URL = SHARECODE ? `./?sharecode=${SHARECODE}` : '.';
+
+/** 把 sharecode 塞进 <link rel="manifest"> 的 href。
+ *
+ *  这是分享域名上唯一救不回来的那条请求：浏览器取 manifest 用的是 credentials: omit
+ *  （规范如此，目的是让 manifest 能被别的源 CORS 复用），页面上那枚 __wb_rsc Cookie
+ *  根本不会跟着走 —— 于是 /manifest.webmanifest 稳定 403，Chrome 判定「不可安装」，
+ *  地址栏的安装入口自然就不出现。Cookie 能救 HTML、JS、CSS、sw.js，唯独救不了 manifest。
+ *
+ *  网关认的是 URL 上的 ?sharecode=（实测 /manifest.webmanifest?sharecode=xxx → 200，
+ *  无 Cookie 也放行），所以这里直接把它烧进 href，和 start_url 的处理保持一致。 */
+function sharecodeManifest(): Plugin {
+  let outDir = 'dist';
+  return {
+    name: 'omb-sharecode-manifest',
+    apply: 'build',
+    configResolved(cfg) {
+      outDir = path.resolve(import.meta.dirname, cfg.build.outDir);
+    },
+    /* 走 closeBundle 而不是 transformIndexHtml：vite-plugin-pwa 注入的那行 link
+       在 HTML 转换阶段之后才落到文件里，post 钩子也抢不到它。直接改产物最稳。 */
+    closeBundle() {
+      if (!SHARECODE) return;
+      const file = path.join(outDir, 'index.html');
+      const html = readFileSync(file, 'utf8');
+      const patched = html.replace(
+        /<link\s+rel="manifest"\s+href="([^"]+)"/,
+        (_tag, href: string) =>
+          `<link rel="manifest" href="${href}${href.includes('?') ? '&' : '?'}sharecode=${SHARECODE}"`,
+      );
+      if (patched === html) {
+        this.warn('没找到 <link rel="manifest">，sharecode 没进 href');
+        return;
+      }
+      writeFileSync(file, patched);
+    },
+  };
+}
 
 /** 每次构建产出一个 version.json。
  *  它不进 precache（workbox 里排除），所以拉到的一定是服务器上的最新值。
@@ -113,6 +150,7 @@ export default defineConfig(({ mode }) => ({
     tailwindcss(),
     versionFile(),
     seoFiles(),
+    sharecodeManifest(),
     VitePWA({
       // prompt：发现新版本时不自动接管，交给 UI 提示用户点「立即刷新」。
       // 游戏正在演奏时被强刷是最糟的体验，所以这里不能用 autoUpdate。
