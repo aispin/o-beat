@@ -59,7 +59,6 @@ async function probeVersionFile(): Promise<VersionFile | null> {
 export function useAppUpdate(): UpdateState {
   const {
     needRefresh: [needRefresh],
-    updateServiceWorker,
   } = useRegisterSW({
     onRegisteredSW(_url, registration) {
       // 主动轮询 SW 更新：浏览器自己只在导航时查，App 长期开着就永远发现不了
@@ -82,7 +81,12 @@ export function useAppUpdate(): UpdateState {
     try {
       const file = await probeVersionFile();
       if (file) {
-        const stale = file.buildId !== __BUILD_ID__;
+        /* buildId 不同还不算数：CDN 回滚到上一版时它也不一样，照着提示会把人往下拽。
+           再加上「远端构建时间不早于本地」这个条件，只在真的更新时才亮提示。 */
+        const remoteAt = Date.parse(file.time);
+        const stale =
+          file.buildId !== __BUILD_ID__ &&
+          (Number.isNaN(remoteAt) || remoteAt >= Date.parse(__BUILD_TIME__));
         setFileUpdate(stale ? file.buildId : null);
         const verdict: UpdateVerdict = stale ? 'stale' : 'latest';
         if (manual) setManualResult(verdict);
@@ -125,10 +129,38 @@ export function useAppUpdate(): UpdateState {
     };
   }, [check]);
 
-  const apply = useCallback(() => {
-    // 先让 SW 接管新版本，再刷新。没有 SW（比如 http 环境）就直接 reload
-    updateServiceWorker(true).catch(() => location.reload());
-  }, [updateServiceWorker]);
+  const apply = useCallback(async () => {
+    /* 三步推倒重来，不要图省事只调 updateServiceWorker(true)：
+       ① 它只给「正在 waiting」的 SW 发 SKIP_WAITING。而我们的 updateReady 有两条来源，
+          version.json 那条命中时根本没有 waiting worker —— 于是点了按钮什么都不会发生，
+          这就是「点更新没反应」的由来。
+       ② 它不清 Cache Storage，新 SW 会原样继承旧运行时缓存，刷新后仍是老内容。
+       ③ 它依赖 controllerchange 的时序，iOS Safari 上并不总是可靠。
+       清缓存 → 注销 SW → 强制刷新，三步走完就不依赖任何时序了。 */
+    try {
+      if ('caches' in window) {
+        const keys = await caches.keys();
+        await Promise.all(keys.map((k) => caches.delete(k)));
+      }
+    } catch {
+      /* 缓存删不掉也继续，刷新是最后兜底 */
+    }
+    try {
+      const regs = (await navigator.serviceWorker?.getRegistrations?.()) ?? [];
+      await Promise.all(regs.map((r) => r.unregister()));
+    } catch {
+      /* 同上 */
+    }
+    /* 分享域名的 CDN 会把 HTML 缓存很久，裸 reload 拿到的还是旧壳。
+       带一个一次性参数才回源，App 挂载后会把它从地址栏摘掉。 */
+    try {
+      const u = new URL(location.href);
+      u.searchParams.set('_r', Date.now().toString(36));
+      location.replace(u.toString());
+    } catch {
+      location.reload();
+    }
+  }, []);
 
   return {
     updateReady: needRefresh || !!fileUpdate,

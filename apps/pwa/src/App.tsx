@@ -35,6 +35,16 @@ export default function App() {
     document.getElementById('boot')?.remove();
     // 告诉 index.html 里的看门狗「界面起来了」，它就不会再弹兜底面板
     document.documentElement.dataset.omb = 'ready';
+    // 更新时为了绕过 CDN 缓存加的 _r 只用一次，用完从地址栏摘掉，别让用户复制出去
+    try {
+      const u = new URL(location.href);
+      if (u.searchParams.has('_r')) {
+        u.searchParams.delete('_r');
+        history.replaceState(null, '', u.toString());
+      }
+    } catch {
+      /* 某些内嵌浏览器对 replaceState 有限制，留着也无害 */
+    }
     if (!glRef.current || !stageRef.current) return;
     game.boot({ stage: stageRef.current, glbg: glRef.current });
   }, []);
