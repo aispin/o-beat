@@ -8,6 +8,7 @@
 | 线上（GitHub Pages） | https://aispin.github.io/o-beat/ |
 | 玩法与数值 | [`docs/prd.md`](docs/prd.md) — 唯一依据 |
 | 实现细节 | [`docs/tech.md`](docs/tech.md) — 分层、音频、采样、编曲格式、验证方法 |
+| lofi 风格方案 | [`docs/tech-lofi.md`](docs/tech-lofi.md) — 编曲、作曲、音色参数、混音基线、调参手册 |
 | 视觉依据 | `prototype/`（冻结的高保真原型，只读参考） |
 
 ## 仓库结构
@@ -28,7 +29,8 @@
 ├─ prototype/           旧版单文件原型，冻结保留，用于视觉对照
 └─ docs/
    ├─ prd.md
-   ├─ tech.md
+   ├─ tech.md            通用实现：分层、音频、采样、构建、验证
+   ├─ tech-lofi.md       lofi 分册：编曲 / 作曲 / 音色 / 混音（每风格一册，当前 lofi）
    ├─ adr/              架构决策记录
    └─ research/         调研：lofi 鼓组合成可行性 + 实验台（lofi-lab/）
 ```
@@ -63,8 +65,11 @@ lead: seq([
 ])
 ```
 
-改旋律、换音色、调音量都只动这一个文件。音色用真实乐器采样（CC0），
-**全部落在 `public/assets/inst/`，随构建发布，不引用 CDN**。
+改**一首曲子**的旋律、音色、音量只动这一个文件；改**一个风格**的手感要动四处
+（编制 / 音色参数 / 混音开口 / 空间），每个风格一册记录在案 ——
+目前有 [`docs/tech-lofi.md`](docs/tech-lofi.md)，编制总表见 [`docs/tech.md`](docs/tech.md) §6.7。
+
+音色用真实乐器采样（CC0），**全部落在 `public/assets/inst/`，随构建发布，不引用 CDN**。
 
 ## 验收
 
@@ -76,7 +81,8 @@ pnpm preview          # 4173
 
 带 `?debug` 打开会挂出 `window.__OMB`（`S` 状态、`setMode`、`startRun` 等），
 可在控制台起一局、查音符数、验证三个模式都能进 `playing`。
-音频验收的细节（录音、RMS、分频段能量）见 [`docs/tech.md`](docs/tech.md) 第 9 节。
+音频验收的细节（录音、RMS、分频段能量）见 [`docs/tech.md`](docs/tech.md) 第 9 节；
+单个风格的验收基线（含鼓组参数表、调参手册）见 [`docs/tech-lofi.md`](docs/tech-lofi.md) 第 5–7 节。
 
 ## 版本发现
 

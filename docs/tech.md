@@ -1,7 +1,7 @@
 # O My Beat · 技术文档
 
 > 面向接手代码的人。产品规则看 [`prd.md`](prd.md)，本文只讲**怎么实现、为什么这么实现、改东西该动哪里**。
-> 最后更新：2026-10-24（引擎全面 TypeScript 化 + 七首手写编曲 + 采样本地化）
+> 最后更新：2026-10-24（引擎全面 TypeScript 化 + 七首手写编曲 + 采样本地化 + 分风格技术分册）
 
 ---
 
@@ -13,6 +13,7 @@
 | 玩法 | 三个模式共用一套单局骨架：鼓手 / 旋律家 / 节奏 |
 | 引擎 | 纯 TypeScript，不碰 React；画布 2D（音符）+ WebGL（氛围层） |
 | 音频 | 两套独立 AudioContext：**对局**（sfx.ts）与**背景音乐**（bgm/） |
+| 分册 | 每种风格一套编制 + 一册文档，见 §6.7；lofi 已完成 |
 | 素材 | 67 个 mp3，1.42MB，全部本地（`public/assets`），不走 CDN |
 | 离线 | precache 应用外壳 607KB；采样走运行时 `CacheFirst`，不占首装 |
 | 类型 | `strict` + `noUnusedLocals` + `noUnusedParameters`，`tsc --noEmit` 是构建第一步 |
@@ -204,7 +205,7 @@ lead: seq([
 | `bass.type` | `quarter` / `eighth` / `half` / `waltz` / `root5` / `riff` |
 | `drums` | 底鼓/军鼓的十六分位数组、踩镲型（`eighth` / `16` / `off` / `none`） |
 | `mix` | `cut` 总低通、`lead/comp/bass` 三档音量、`vol` 整首 |
-| `echo` / `vinyl` / `swing` | ping-pong 回声、黑胶底噪、摇摆量（按曲目单独给） |
+| `echo` / `vinyl` / `swing` | ping-pong 回声、黑胶底噪、奇数十六分位推后的秒数（`arrange.ts` 逐格加） |
 
 **改一首曲子只动 `compose.ts` 对应那一行**，不用碰排程器。
 
@@ -232,6 +233,39 @@ lead: seq([
 来源：`tonejs-instruments`（打包 MIT），采样本体 CC0（VSCO2 CE / Iowa / Karoryfer）。
 用 ffmpeg 统一转成 `单声道 44.1kHz 96kbps`，并 `atrim + afade` 只留有用的一段。
 **全部落在 `public/assets`，随构建发布，不引用任何 CDN。**
+
+### 6.7 风格分册（每个风格一套编制）
+
+一个风格要立得住，需要四样东西**同时**到位：
+
+| 件 | 落在哪 | 举例（lofi） |
+|---|---|---|
+| 编制 | `compose.ts` 每首的 `inst` / `comp` / `bass` / `drums` | 电钢 + 尼龙弦 + 电贝斯 + 合成鼓 |
+| 音色参数 | `voices.ts` 的 `voice()`、`lofi-kit.ts` | 电钢 lp 2600 + 12 ms 叠层 |
+| 混音开口 | `mix.cut` + `lead / comp / bass / vol` | 3200 Hz，0.44 / 0.26 / 0.52 / 1.5 |
+| 空间 | `engine.ts` 的 `vinyl`、`sfx.ts` 的 `SPACES` | 黑胶 0.05 + IR 1.4 s / tape 0.032 |
+
+只换鼓组、或只改 `cut`，得到的是「同一首歌换了件衣服」。五个风格当前各自的一套：
+
+| 风格 | 主奏 | 和声 | 低音 | 鼓 | cut |
+|---|---|---|---|---|---|
+| `pixel` | `chipLead` 方波 | `chipLead` arp8 | `chipBass` 三角 | `chip` 全合成 | 8200 |
+| `cyber` | `bell` / `pluck` | `saw` pad / `epiano` stab | `ebass` / `sub` | `techno` / `kpr77` | 13000 / 9000 |
+| `classic` | `violin` | `piano` waltz | `cello` | 无 | 11000 |
+| `lofi` | `epiano` / `flute` | `nylon` arp8 / pick | `ebass` half / `nylon` root5 | `lofi` 合成 | 3200 / 8000 |
+| `rock` | `egt` 失真 | `egt` riff | `ebass` eighth | `acoustic` | 6400 |
+
+每种风格一册，逐册调优、逐册记录：
+
+| 册 | 状态 | 内容 |
+|---|---|---|
+| [`tech-lofi.md`](tech-lofi.md) | **已完成** | 两首 lofi 的编曲、作曲、鼓组参数表、混音基线、调参手册、反例 |
+| `tech-classic.md` | 待写 | 钢琴三重奏、三拍子重心、无鼓时的空间处理 |
+| `tech-rock.md` | 待写 | 失真吉他、power chord、重鼓与削波余量 |
+| `tech-cyber.md` | 待写 | FM 钟、超锯齿、ping-pong 回声、sub 与低频管理 |
+| `tech-pixel.md` | 待写 | 方波 / 三角波、限色、谱面即旋律 |
+
+写下一册时照 [`tech-lofi.md` §9](tech-lofi.md) 的模板：四件套原则、必答的 8 个问题、维护规则。
 
 ---
 
@@ -328,6 +362,7 @@ ffmpeg -i take.webm -af volumedetect -f null -      # RMS 与峰值
 | 曲目列表 / 调性 / 拍号 | `game.ts` 的 `SONGS` |
 | 某个模式的谱面密度 | `game.ts` 的 `buildChart()` 分支 |
 | 某首曲子的旋律、伴奏型、音量 | `bgm/compose.ts` 对应那一行 |
+| **lofi 的编曲 / 音色 / 混音细节** | **[`tech-lofi.md`](tech-lofi.md)** — 参数表、调参手册、反例 |
 | 新增一首曲子 | `bgm/compose.ts` 加一条 + `game.ts` 的 `SONGS` 加一条 |
 | 采样（换音色 / 加音域） | `public/assets/inst/…` + `bgm/samples.ts` 的 `SAMPLES` |
 | 对局音色、混响空间 | `sfx.ts` 的 `SPACES` / `BUS_DEF` / `INST` |
@@ -350,3 +385,8 @@ ffmpeg -i take.webm -af volumedetect -f null -      # RMS 与峰值
    Schroeder 混响。`sfx.ts` 与 `bgm/` 都不碰 DOM 结构，换 `AudioContext` 实现即可。
 6. **`game.ts` 仍是一整块**（约 2600 行）。它是玩法真源，拆细会让「改一个数值要跨三个文件」，
    暂时保持单文件；再长就该按「谱面 / 判定 / 渲染 / 快照」四块分。
+7. **`swing` 是绝对秒数，不随 BPM 缩放**。同一个 0.012 在 64 BPM 约 5%、在 132 BPM 约 11%。
+   目前只有 lofi 用，够用；将来若要跨曲速复用，该改成「十六分音符的百分比」。
+8. **风格参数散在四个文件**（`compose.ts` / `voices.ts` / `lofi-kit.ts` / `sfx.ts` 的 `SPACES`）。
+   没有统一的「风格套件」对象，因为每首曲子的编制本来就不同。代价是调一个风格要认四个位置，
+   所以每个风格补一册文档，把位置与数值固定下来。
