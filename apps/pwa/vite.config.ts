@@ -182,5 +182,12 @@ export default defineConfig(({ mode }) => ({
   server: { host: '0.0.0.0', port: 5173, allowedHosts: true },
   preview: { host: '0.0.0.0', port: 4173, allowedHosts: true },
   resolve: { alias: { '@': path.resolve(import.meta.dirname, 'src') } },
-  build: { target: 'es2022', assetsInlineLimit: 4096 },
+  build: {
+    /* 别写 es2022。依赖里带了 class static block（ES2022 才有的语法，Safari 16.4 起支持），
+       target 设成 es2022 就等于告诉 esbuild「原样留着」，而微信内置浏览器跑的是系统
+       WKWebView —— iOS 16.3 的 Safari 16.3 不认识 `static {}`，整个包在模块解析阶段就抛
+       `Unexpected token '{'`，页面全黑。压到 safari15 逼 esbuild 把它降级。 */
+    target: ['es2020', 'safari15'],
+    assetsInlineLimit: 4096,
+  },
 }));
