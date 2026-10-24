@@ -252,10 +252,6 @@
       </div>
     </noscript>
 
-    <script type="module" src="/src/main.tsx"></script>
-  </body>
-</html>
-
     <!-- 启动看门狗：正常情况 #root 里早就长出 .app-shell 了。
          8 秒还是空的，说明脚本没跑起来（离线缓存错乱、浏览器拦了资源、
          某条旧代码在初始化时抛异常），这时候必须把原因显示出来，
@@ -292,7 +288,20 @@
           function (e) {
             var tag = e.target && e.target.tagName;
             if (tag === 'SCRIPT' || tag === 'LINK') {
-              errs.push('资源加载失败：' + (e.target.src || e.target.href || ''));
+              var bad = e.target.src || e.target.href || '';
+              errs.push('资源加载失败：' + bad);
+              /* 最常见的那种坏法：CDN 缓存了旧 HTML，而它引用的带 hash 的 JS
+                 已经随新构建从服务器上删掉了 —— 页面永远起不来，刷新多少次都一样。
+                 只有带一个新的查询串重新请求，才能把 HTML 也一起换掉。
+                 只试一次，避免真的资源缺失时无限重载。 */
+              try {
+                if (/\/assets\//.test(bad) && !sessionStorage.getItem('omb.assetRetry')) {
+                  sessionStorage.setItem('omb.assetRetry', '1');
+                  var u = new URL(location.href);
+                  u.searchParams.set('_r', Date.now().toString(36));
+                  location.replace(u.toString());
+                }
+              } catch (err) {}
             } else {
               errs.push(
                 (e.message || '脚本错误') +

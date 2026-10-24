@@ -189,5 +189,9 @@ export default defineConfig(({ mode }) => ({
        `Unexpected token '{'`，页面全黑。压到 safari15 逼 esbuild 把它降级。 */
     target: ['es2020', 'safari15'],
     assetsInlineLimit: 4096,
+    /* 不清理 dist/assets。分享域名那张 CDN 会把 HTML 缓存很久，而 HTML 引用的是带 hash 的
+       JS —— 默认每次构建都清空目录，旧 HTML 引用的文件就永远 404/403，用户看到的是白屏，
+       刷新多少次都一样。留着旧文件，缓存期的旧 HTML 至少还能跑。 */
+    emptyOutDir: false,
   },
 }));
