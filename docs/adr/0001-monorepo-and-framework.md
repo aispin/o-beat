@@ -1,6 +1,6 @@
 # ADR 0001 · monorepo 与前端技术选型
 
-- 状态：已采纳
+- 状态：已采纳；第 3 条（引擎保持纯 JS）已被 [ADR 0002](0002-handwritten-score-and-samples.md) 取代
 - 日期：2026-10-24
 - 相关：`docs/prd.md` §15、`apps/pwa/`
 

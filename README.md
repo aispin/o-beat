@@ -6,7 +6,8 @@
 |---|---|
 | 线上（WorkBuddy） | https://obeat.app.workbuddy.host |
 | 线上（GitHub Pages） | https://aispin.github.io/o-beat/ |
-| 设计依据 | [`docs/prd.md`](docs/prd.md) — 玩法与数值的唯一依据 |
+| 玩法与数值 | [`docs/prd.md`](docs/prd.md) — 唯一依据 |
+| 实现细节 | [`docs/tech.md`](docs/tech.md) — 分层、音频、采样、编曲格式、验证方法 |
 | 视觉依据 | `prototype/`（冻结的高保真原型，只读参考） |
 
 ## 仓库结构
@@ -14,13 +15,20 @@
 ```
 .
 ├─ apps/pwa/            正式产品：React 19 + Vite 8 + Tailwind v4 + shadcn/ui + TS
-│  ├─ src/engine/       canvas / WebAudio 引擎（纯 JS，不碰 React）
+│  ├─ src/engine/       引擎（纯 TS，不碰 React）
+│  │  ├─ index.ts       门面：UI 只认这里
+│  │  ├─ game.ts        谱面 / 判定 / 渲染 / 快照
+│  │  ├─ sfx.ts         对局音频：采样 + 物理建模 + 卷积混响 + 程序化音效
+│  │  ├─ scene.ts       WebGL 氛围层（5 套 GLSL）
+│  │  ├─ backing.ts     伴奏排程（按 GROOVE 生成鼓 / 贝斯 / 和声）
+│  │  └─ bgm/           背景音乐：compose → score → arrange → voices
 │  ├─ src/components/   界面层（shadcn 组件 + 页级组件）
-│  ├─ src/hooks/        快照订阅、版本发现
-│  └─ public/assets/    采样（钢琴 8 锚点 + 鼓组 3 套 × 4 件，312KB）
+│  ├─ src/hooks/        快照订阅、版本发现、BGM 生命周期
+│  └─ public/assets/    采样 67 个 mp3 / 1.42MB（钢琴 8 + 鼓 12 + 六件乐器 47）
 ├─ prototype/           旧版单文件原型，冻结保留，用于视觉对照
 └─ docs/
    ├─ prd.md
+   ├─ tech.md
    └─ adr/              架构决策记录
 ```
 
@@ -35,6 +43,39 @@ pnpm build:gh       # 同上，base=/o-beat/（GitHub Pages 用）
 ```
 
 要求 Node ≥ 22、pnpm ≥ 12。
+
+## 声音
+
+两套互不干扰的音频：
+
+- **对局**（`sfx.ts`）：采样鼓 + 钢琴采样 + Karplus-Strong 拨弦 + FM/减法合成，
+  经乐器总线 → 卷积混响 → 胶水压缩 → 限幅。MISS 只是不播击打音，伴奏（`backing.ts`）不断。
+- **背景音乐**（`bgm/`）：首页与结算循环当前曲目，演奏时自动静音。
+
+七首曲子都是**手写编曲**，不是生成器产物。旋律写在 `bgm/compose.ts` 里，一小节一行、
+16 格（3/4 为 12 格）、`.` 是留白、数字是绝对 MIDI：
+
+```ts
+lead: seq([
+  '76 . . . 79 . . . 81 . . . 79 . . .',
+  '. . 74 . 76 . . . 79 . . . . . . .',
+])
+```
+
+改旋律、换音色、调音量都只动这一个文件。音色用真实乐器采样（CC0），
+**全部落在 `public/assets/inst/`，随构建发布，不引用 CDN**。
+
+## 验收
+
+```bash
+pnpm typecheck        # tsc --noEmit，strict
+pnpm build            # 类型 + 构建
+pnpm preview          # 4173
+```
+
+带 `?debug` 打开会挂出 `window.__OMB`（`S` 状态、`setMode`、`startRun` 等），
+可在控制台起一局、查音符数、验证三个模式都能进 `playing`。
+音频验收的细节（录音、RMS、分频段能量）见 [`docs/tech.md`](docs/tech.md) 第 9 节。
 
 ## 版本发现
 
@@ -95,5 +136,7 @@ pnpm --filter @o-beat/pwa gen:social   # 生成 public/og.png 与 public/screens
 
 ## 架构决策
 
-见 [`docs/adr/0001-monorepo-and-framework.md`](docs/adr/0001-monorepo-and-framework.md)：
-界面用框架、引擎用原生 JS，两边的边界是一个快照对象。
+- [`docs/adr/0001-monorepo-and-framework.md`](docs/adr/0001-monorepo-and-framework.md)：
+  界面用框架、引擎不碰 React，两边的边界是一个快照对象。
+- [`docs/adr/0002-handwritten-score-and-samples.md`](docs/adr/0002-handwritten-score-and-samples.md)：
+  为什么把生成式旋律换成手写编曲、为什么音色用本地采样、为什么引擎全面 TS 化。
