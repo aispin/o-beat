@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { Settings2 } from 'lucide-react';
+import { MonitorDown, Settings2 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import {
@@ -98,9 +98,13 @@ function Block({
 export function HomeScreen({
   snap,
   onOpenSettings,
+  showInstall,
+  onInstall,
 }: {
   snap: GameSnapshot;
   onOpenSettings: () => void;
+  showInstall: boolean;
+  onInstall: () => void;
 }) {
   const rhythm = snap.mode === 'rhythm';
   const diffNote = DIFF_NOTE[snap.mode][snap.diff];
@@ -325,6 +329,20 @@ export function HomeScreen({
         <p className="mt-3 text-center text-[11px] tracking-wide text-text-dim">
           {rhythm ? '跟着节拍器敲 · 灰色段要留白 · 没有失败' : '跟着拍子敲准就好 · 没有失败'}
         </p>
+        {/* 安装入口放在这里而不是顶部：顶部那条会和品牌行、设置按钮撞在一起。
+            只在浏览器真的接住了 beforeinstallprompt 时才出现，装过就不再显示。 */}
+        {showInstall ? (
+          <div className="mt-1.5 text-center">
+            <button
+              type="button"
+              onClick={onInstall}
+              className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+            >
+              <MonitorDown className="size-3.5" />
+              装到桌面 · 断网也能玩
+            </button>
+          </div>
+        ) : null}
       </div>
     </>
   );

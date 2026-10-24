@@ -200,6 +200,20 @@ const S = {
   bgTarget: 200,
 };
 
+/* 读设置。必须整段包住：iOS 关掉「跨站跟踪」、Safari 无痕、部分 App 内置浏览器
+   都会让 localStorage 一碰就抛 SecurityError。这是模块顶层代码，一抛整个包都进不来，
+   页面就是一片黑 —— 所以这里绝不能让异常漏出去。 */
+function loadSettings() {
+  try {
+    const raw = localStorage.getItem('omb.settings');
+    if (!raw) return {};
+    const v = JSON.parse(raw);
+    return v && typeof v === 'object' ? v : {};
+  } catch (e) {
+    return {};
+  }
+}
+
 const settings = Object.assign({
   lookahead: CFG.time.defaultLookahead,
   offset: 0,
@@ -210,7 +224,7 @@ const settings = Object.assign({
   timbre: 'wood',
   style: 'straight',
   bpm: 0,
-}, JSON.parse(localStorage.getItem('omb.settings') || '{}'));
+}, loadSettings());
 
 // BPM 不跨会话：每次冷启动都回落到当前风格的缺省值。
 // 否则「加快速度继续」把上一轮的 174 存住了，第二天打开就是一场打不动的局。

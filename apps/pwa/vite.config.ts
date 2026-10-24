@@ -25,6 +25,19 @@ function buildId() {
 const BUILD_ID = buildId();
 const BUILD_TIME = new Date().toISOString();
 
+/** SEO 的规范地址固定指向 GitHub Pages。
+ *  原因：WorkBuddy 的分享域名要靠 ?sharecode 才能拿到 HTML，爬虫一律 403，
+ *  那边根本不可能被索引；Pages 是唯一真正可爬的地址，重复内容统一归到这里。 */
+const CANONICAL = 'https://aispin.github.io/o-beat/';
+const OG_IMAGE = `${CANONICAL}og.png`;
+
+/** WorkBuddy 的分享域名要靠 ?sharecode 才给 HTML，裸访问 / 是 403。
+ *  Chrome 判定「可安装」时会去取 start_url，拿到 403 就不在地址栏给安装入口 ——
+ *  这正是同一个包在 Pages 上有提示、在分享域名上没有的原因。
+ *  发布到分享域名时把 sharecode 传进来，start_url 就会带上它。 */
+const SHARECODE = process.env.OMB_SHARECODE || '';
+const START_URL = SHARECODE ? `./?sharecode=${SHARECODE}` : '.';
+
 /** 每次构建产出一个 version.json。
  *  它不进 precache（workbox 里排除），所以拉到的一定是服务器上的最新值。
  *  Service Worker 的 onNeedRefresh 只能发现「自己」的更新，
@@ -43,6 +56,50 @@ function versionFile(): Plugin {
   };
 }
 
+/** SEO 产物 + HTML 里的占位符替换。
+ *  robots.txt / sitemap.xml 只有在域名根目录才会被搜索引擎认，GitHub Pages 的项目页
+ *  挂在 /o-beat/ 下，这两份文件目前是「先备着」：将来换成独立域名，把 CANONICAL 一改就生效。 */
+function seoFiles(): Plugin {
+  const today = BUILD_TIME.slice(0, 10);
+  return {
+    name: 'omb-seo',
+    apply: 'build',
+    transformIndexHtml(html) {
+      return html
+        .replaceAll('__CANONICAL__', CANONICAL)
+        .replaceAll('__OG_IMAGE__', OG_IMAGE);
+    },
+    generateBundle() {
+      this.emitFile({
+        type: 'asset',
+        fileName: 'robots.txt',
+        source: [
+          'User-agent: *',
+          'Allow: /',
+          '',
+          `Sitemap: ${CANONICAL}sitemap.xml`,
+          '',
+        ].join('\n'),
+      });
+      this.emitFile({
+        type: 'asset',
+        fileName: 'sitemap.xml',
+        source: [
+          '<?xml version="1.0" encoding="UTF-8"?>',
+          '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
+          '  <url>',
+          `    <loc>${CANONICAL}</loc>`,
+          `    <lastmod>${today}</lastmod>`,
+          '    <changefreq>weekly</changefreq>',
+          '    <priority>1.0</priority>',
+          '  </url>',
+          '</urlset>',
+          '',
+        ].join('\n'),
+      });
+    },
+  };
+}
 
 export default defineConfig(({ mode }) => ({
   base: mode === 'gh' ? '/o-beat/' : '/',
@@ -55,6 +112,7 @@ export default defineConfig(({ mode }) => ({
     react(),
     tailwindcss(),
     versionFile(),
+    seoFiles(),
     VitePWA({
       // prompt：发现新版本时不自动接管，交给 UI 提示用户点「立即刷新」。
       // 游戏正在演奏时被强刷是最糟的体验，所以这里不能用 autoUpdate。
@@ -62,29 +120,60 @@ export default defineConfig(({ mode }) => ({
       injectRegister: false,
       includeAssets: ['favicon.svg', 'icons/apple-touch-icon.png'],
       manifest: {
+        id: '.',
         name: 'O My Beat',
         short_name: 'O My Beat',
         description: '节奏练习 · 音感训练',
         lang: 'zh-CN',
-        start_url: '.',
+        dir: 'ltr',
+        start_url: START_URL,
         scope: '.',
         display: 'standalone',
+        display_override: ['standalone', 'minimal-ui'],
         orientation: 'portrait',
         background_color: '#07090D',
         theme_color: '#07090D',
+        categories: ['games', 'music', 'education'],
+        prefer_related_applications: false,
         icons: [
           { src: 'icons/icon-192.png', sizes: '192x192', type: 'image/png' },
           { src: 'icons/icon-512.png', sizes: '512x512', type: 'image/png' },
-          { src: 'icons/icon-512-maskable.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+          {
+            src: 'icons/icon-512-maskable.png',
+            sizes: '512x512',
+            type: 'image/png',
+            purpose: 'maskable',
+          },
+        ],
+        // 有 screenshots 才会弹「富安装」对话框（带界面预览），否则只是一条干巴巴的提示
+        screenshots: [
+          {
+            src: 'screenshots/wide-1280x720.png',
+            sizes: '1280x720',
+            type: 'image/png',
+            form_factor: 'wide',
+            label: '首页：模式、音色、风格与 BPM',
+          },
+          {
+            src: 'screenshots/narrow-390x844.png',
+            sizes: '390x844',
+            type: 'image/png',
+            form_factor: 'narrow',
+            label: '演奏界面',
+          },
         ],
       },
       workbox: {
         // 采样一共 312KB，直接进 precache：离线也能完整玩，不用等第二轮下载
         globPatterns: ['**/*.{js,css,html,svg,png,ico,mp3,woff2}'],
-        // version.json 绝不能进缓存，否则「检查更新」永远拿到旧值
-        globIgnores: ['**/version.json'],
+        // version.json 绝不能进缓存，否则「检查更新」永远拿到旧值；
+        // 分享图和安装截图只有浏览器 UI 和社交爬虫会要，不占用户的离线配额
+        globIgnores: ['**/version.json', '**/og.png', '**/screenshots/**'],
         navigateFallback: 'index.html',
         cleanupOutdatedCaches: true,
+        // 首次激活就接管当前页面：否则第一次访问的导航不会被 SW 拦截，
+        // 换到只要带 ?sharecode 才给 HTML 的托管上，刷新一次就会掉进网关的错误页
+        clientsClaim: true,
       },
       devOptions: { enabled: false },
     }),

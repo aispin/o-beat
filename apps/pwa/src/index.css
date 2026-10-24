@@ -248,7 +248,7 @@
     overflow-y: auto;
     overscroll-behavior: contain;
     padding: calc(env(safe-area-inset-top, 0px) + 16px) 16px
-      calc(env(safe-area-inset-bottom, 0px) + 108px);
+      calc(env(safe-area-inset-bottom, 0px) + 134px);
     scrollbar-width: none;
   }
 

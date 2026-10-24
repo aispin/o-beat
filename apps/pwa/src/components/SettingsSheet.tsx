@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { RefreshCw } from 'lucide-react';
+import { Download, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { Button } from '@/components/ui/button';
@@ -7,7 +7,16 @@ import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/
 import { Slider } from '@/components/ui/slider';
 import { Switch } from '@/components/ui/switch';
 import { game, type GameSnapshot, type Settings } from '@/engine';
+import { useInstallPrompt } from '@/hooks/useInstallPrompt';
 import { cn } from '@/lib/utils';
+
+const INSTALL_HINT = {
+  installed: '从桌面图标启动即为独立窗口',
+  chromium: '离线可玩，不再占用浏览器标签',
+  ios: 'Safari：分享 → 添加到主屏幕',
+  'mac-safari': 'Safari：文件 → 添加到程序坞',
+  unsupported: '当前浏览器不支持，请用 Chrome / Edge 打开',
+} as const;
 
 function Row({
   label,
@@ -41,15 +50,17 @@ export function SettingsSheet({
   onOpenChange,
   snap,
   update,
+  install,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   snap: GameSnapshot;
   update: {
     checking: boolean;
-    check: (manual?: boolean) => Promise<'latest' | 'stale'>;
+    check: (manual?: boolean) => Promise<'latest' | 'stale' | 'unknown'>;
     apply: () => void;
   };
+  install: ReturnType<typeof useInstallPrompt>;
 }) {
   const s: Settings = snap.settings;
   const rhythm = snap.mode === 'rhythm';
@@ -63,9 +74,19 @@ export function SettingsSheet({
         action: { label: '刷新', onClick: update.apply },
         duration: 8000,
       });
+    } else if (verdict === 'unknown') {
+      toast('暂时检查不了', {
+        description: '当前托管不开放版本文件，下次打开应用时会自动再试。',
+      });
     } else {
       toast('已经是最新版本', { description: `v${version}${sha ? ` · ${sha.split('.')[0]}` : ''}` });
     }
+  };
+
+  const onInstall = async () => {
+    const outcome = await install.prompt();
+    if (outcome === 'dismissed') toast('已取消安装');
+    if (outcome === 'unavailable') toast('浏览器这会儿不接受安装请求', { description: '过一会儿再试，或直接用地址栏右侧的安装图标。' });
   };
 
   return (
@@ -131,7 +152,28 @@ export function SettingsSheet({
           <Switch checked={s.sound} onCheckedChange={(v) => game.setSettings({ sound: v })} />
         </Row>
 
+        {/* 地址栏那个安装图标受用户档案状态影响（装过、点过忽略、策略限制都会让它不再出现），
+            所以给一个我们自己控制得了的入口 */}
         <div className="mt-4 rounded-md border border-border bg-white/[0.03] px-4 py-3">
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <b className="block text-[12px] font-medium">
+                {install.installed ? '已安装到桌面' : '安装到桌面'}
+              </b>
+              <em className="mt-0.5 block text-[10.5px] not-italic text-text-dim">
+                {INSTALL_HINT[install.platform]}
+              </em>
+            </div>
+            {!install.installed && install.canPrompt ? (
+              <Button variant="outline" size="sm" onClick={onInstall}>
+                <Download className="size-3.5" />
+                安装
+              </Button>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="mt-2 rounded-md border border-border bg-white/[0.03] px-4 py-3">
           <div className="flex items-center justify-between gap-3">
             <div className="min-w-0">
               <b className="block text-[12px] font-medium tabular-nums">

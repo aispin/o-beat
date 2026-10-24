@@ -9,7 +9,8 @@
     "build:gh": "tsc --noEmit && vite build --base=/o-beat/ --mode gh",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "gen:social": "node scripts/gen-social.mjs"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.15",
