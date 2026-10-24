@@ -185,7 +185,9 @@ export function scheduleStep(bus: Bus, sc: Score, i: number, t: number): void {
   }
 
   // 噪声瞬态给强拍的旋律一点"咬合感"（摇滚和电子都要）
-  if (sc.mix.cut < 6000 && s % 4 === 0 && sc.drums.kit !== 'acoustic') {
+  // lofi 不要：那套鼓的全部功夫都在"不咬"，加个 9kHz 点击就白做了
+  const kit = sc.drums.kit;
+  if (sc.mix.cut < 6000 && s % 4 === 0 && kit !== 'acoustic' && kit !== 'lofi') {
     noiseHit(bus, t, 0.02, 0.02, 'highpass', 9000, 0.7);
   }
 }

@@ -67,7 +67,7 @@ const GROOVE: Record<string, Groove> = {
     human: 0.004,
   },
   lofi: {
-    kit: 'kpr77',
+    kit: 'lofi',
     kick: [0, 1.75, 2.5],
     snare: [1, 3],
     open: [],

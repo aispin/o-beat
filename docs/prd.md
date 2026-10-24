@@ -489,7 +489,7 @@ BPM 由玩家用 `−/+` 调（40–200，步长 2），风格只给缺省值和
 | 联系 | 是否保留 |
 |---|---|
 | BPM / 拍号 | 保留。谱面按拍网格生成，每个音的起点都是拍的整数倍或半倍，和节拍器同源 |
-| 鼓组音色 | 保留。衬底鼓组取 `GROOVE[场景].kit`（cyber→techno / lofi→kpr77 / classic、rock→acoustic），换歌＝换"鼓房" |
+| 鼓组音色 | 保留。衬底鼓组取 `GROOVE[场景].kit`（cyber→techno / lofi→lofi（合成） / classic、rock→acoustic），换歌＝换"鼓房" |
 | 和弦 / 贝斯 / GROOVE 加花 | **断开**。不加，否则听感会从"练时值"滑向"跟着玩" |
 
 ### 10.2 信号链
@@ -537,7 +537,9 @@ BPM 由玩家用 `−/+` 调（40–200，步长 2），风格只给缺省值和
 | `bass` | KS 拨弦 + 正弦超低音 | 保证小喇叭也有基频 |
 | `pad` | 多层锯齿/三角 + 合唱调制延迟 | 铺底，混响发送 0.62 最湿 |
 | `chipLead` / `chipBass` | 方波（+ 轻五度） / 三角波 | 8bit 专用，只给像素心跳 |
-| `drum` | 3 套采样：`acoustic` / `techno` / `kpr77`；`chip` 全合成 | kick / snare / hihat / tom1 |
+| `drum` | 3 套采样：`acoustic` / `techno` / `kpr77`；2 套全合成：`chip` / `lofi` | kick / snare / hihat / tom1 |
+
+`lofi` 套鼓是算出来的，没有采样文件：军鼓 = 双模态鼓皮（1 : 1.58）+ 三段响弦噪声，4–8 ms 起音；底鼓 = 正弦扫频 + 12 ms 敲门噪声；踩镲 = 两层粉噪 + 一层 3.4 kHz 镲身。两套预设（`bright` / `tape`）每首曲子随机一套，只改音色不改电平。详见 `docs/research/lofi-drums.md`。
 
 力度（velocity）会同时影响音量与**低通截止**——轻敲不只是小声，是更闷。
 这是"真实感"最廉价也最有效的来源，纯合成做不到。

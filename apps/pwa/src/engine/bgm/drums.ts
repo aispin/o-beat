@@ -1,10 +1,19 @@
 /* 鼓：采样优先，缺资源时退到合成。
-   chip 套鼓没有采样 —— 8bit 的鼓本来就是算出来的，硬塞真鼓反而不对味。 */
+   chip 套鼓没有采样 —— 8bit 的鼓本来就是算出来的，硬塞真鼓反而不对味。
+   lofi 套鼓也没有采样 —— 那套鼓要的是软起音、高频收、每次都不一样，
+   采样反而不方便改（见 src/engine/lofi-kit.ts）。 */
 import type { Bus } from './types';
 import { out, noiseHit } from './voices';
+import { lofiHit } from '../lofi-kit';
 
 export function kick(bus: Bus, t: number, gain: number, kit: string): void {
   const c = bus.ctx;
+
+  if (kit === 'lofi') {
+    lofiHit(c, bus.master, 'kick', t, gain);
+    return;
+  }
+
   const buf = bus.bufs[`drum:${kit}:kick`];
 
   if (buf) {
@@ -43,6 +52,19 @@ export function drumSample(
   pan = 0,
 ): void {
   const c = bus.ctx;
+
+  if (kit === 'lofi') {
+    // 开镲在采样路径是靠把 hihat 降速拉长（rate 0.82），合成侧直接换一层
+    const open = hit === 'hihat' && rate < 0.9;
+    const name = open ? 'openhat'
+      : hit === 'hihat' ? 'hat'
+      : hit === 'snare' ? 'snare'
+      : hit === 'kick' ? 'kick'
+      : 'tom';
+    lofiHit(c, bus.master, name, t, gain, { pan });
+    return;
+  }
+
   const buf = bus.bufs[`drum:${kit}:${hit}`];
 
   if (!buf) {

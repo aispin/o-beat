@@ -433,7 +433,7 @@ const PENTA: Record<Scale, number[]> = { maj: [0, 2, 4, 7, 9], min: [0, 3, 5, 7,
 
 /* 场景 → 主奏音色 / 鼓组 */
 const SCENE_INST: Record<string, string> = { cyber: 'lead', classic: 'piano', lofi: 'rhodes', rock: 'guitar' };
-const SCENE_KIT: Record<string, string> = { cyber: 'techno', classic: 'acoustic', lofi: 'kpr77', rock: 'acoustic' };
+const SCENE_KIT: Record<string, string> = { cyber: 'techno', classic: 'acoustic', lofi: 'lofi', rock: 'acoustic' };
 
 /* 纯节奏模式的搞怪音色 */
 const TIMBRES: Timbre[] = [

@@ -25,8 +25,10 @@
      SFX.duck(t, amount)            侧链压缩（让伴奏给底鼓让位）
      SFX.now() / SFX.setMute(bool)
 
-   这一层不 import 任何别的引擎模块：它是底层，只依赖 WebAudio。
+   这一层只依赖 WebAudio 与一个纯合成鼓组模块（lofi-kit），不依赖别的引擎模块。
    ============================================================ */
+
+import { lofiHit, reroll as rerollLofiKit } from './lofi-kit';
 
 /* ---------------- 类型 ---------------- */
 
@@ -443,7 +445,16 @@ function applySpace(name: string): void {
 }
 
 function setSpace(name: string): void { if (S.ac) applySpace(name); }
-function setKit(name: string): void { S.kit = KITS[name] ? name : 'acoustic'; }
+
+/* 无采样的合成鼓组：chip 是芯片味，lofi 是软起音、高频收的套鼓 */
+const SYNTH_KIT = ['chip', 'lofi'];
+
+function setKit(name: string): void {
+  const known = !!KITS[name] || SYNTH_KIT.indexOf(name) >= 0;
+  S.kit = known ? name : 'acoustic';
+  // 每次换到 lofi 套鼓掷一次预设（明亮 / 更暗），同一首里不再变
+  if (S.kit === 'lofi') rerollLofiKit();
+}
 
 /* ---------------- 采样加载 ---------------- */
 
@@ -602,6 +613,18 @@ function drum(name: DrumName, t: number, opt?: DrumOpt): void {
   const pan = o.pan || 0;
 
   if (kit === 'chip') { chipDrum(name, t, v); return; }
+
+  /* lofi 套鼓：合成，不进采样路径。v 按采样鼓的同一尺度换算 ——
+     采样路径自己带了 1.05 / 1 / 0.72 的系数，合成侧要跟上，
+     否则一键切回采样时整体音量会跳。 */
+  if (kit === 'lofi') {
+    const ac = S.ac;
+    const bus = name === 'kick' ? 'kick' : name === 'snare' || name === 'tom' ? 'snare' : 'hat';
+    const k = name === 'kick' ? 1.05 : name === 'snare' || name === 'tom' ? 1 : name === 'openhat' ? 0.52 : 0.72;
+    lofiHit(ac, busOf(bus), name, t, v * k, { pan });
+    if (name === 'kick') duck(t, o.duck == null ? 0.34 : o.duck);
+    return;
+  }
 
   if (name === 'kick') {
     const r = playBuf('drum:' + kit + ':kick', t, { gain: v * 1.05, pan, bus: 'kick', human: 0.006 });

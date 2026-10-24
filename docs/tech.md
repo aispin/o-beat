@@ -29,6 +29,7 @@ apps/pwa/
 │  ├─ sfx.ts            对局音色引擎：混音台 / 卷积混响 / 物理建模 / 程序化 SFX
 │  ├─ scene.ts          WebGL 氛围层：5 套 GLSL + 一套公共框架
 │  ├─ backing.ts        伴奏排程：按 GROOVE 生成鼓 / 贝斯 / 和声事件
+│  ├─ lofi-kit.ts       lofi 套鼓：纯合成，两套预设随机，对局与 BGM 共用
 │  └─ bgm/              背景音乐，7 个模块，见第 6 节
 ├─ src/components/      界面（首页 / HUD / 结算 / 设置 / 暂停 / 更新条）
 ├─ src/hooks/           快照订阅、版本发现、安装提示、BGM 生命周期
@@ -68,7 +69,7 @@ components / hooks
 | 层 | 允许知道什么 | 明确不知道什么 |
 |---|---|---|
 | `game.ts` | SFX / Scene / Backing / bgm.score | React、DOM 结构、界面文案 |
-| `sfx.ts` | 只有 WebAudio | 曲目、场景、玩法 |
+| `sfx.ts` | WebAudio + `lofi-kit`（无其它依赖） | 曲目、场景、玩法 |
 | `backing.ts` | SFX + 曲目（和弦、拍号） | 画面、判定、界面 |
 | `bgm/` | 自己的采样与编曲 | 玩法、判定、对局状态 |
 | 界面 | 快照 + 命令 | 引擎内部任何字段 |
@@ -129,7 +130,11 @@ bpm / score / combo / countdown / result / settings …
 | FM 合成 | `rhodes`：正弦载波 + 调制器 + 音叉泛音 + 5.2Hz 颤音 |
 | 减法合成 | `lead`、`pad`：三层失谐锯齿 + 次低音 + 滤波包络 + 合唱延迟 |
 | 芯片音 | `chipLead`（方波 + 五度，5kHz 以上不加）、`chipBass`（三角波） |
-| 鼓 | 采样 3 套（acoustic / techno / kpr77）× 4 件；`chip` 套鼓完全合成 |
+| 鼓 | 采样 3 套（acoustic / techno / kpr77）× 4 件；`chip` / `lofi` 两套完全合成 |
+
+`lofi` 套鼓在 `lofi-kit.ts`，唯一的导出是 `lofiHit(ctx, dest, hit, t, v, {dark, pan})`。
+给一个目标节点就能发声，所以 `sfx.ts`（对局总线）和 `bgm/drums.ts`（BGM 总线）共用同一份代码。
+`amp` 是「与同一 v 的采样鼓等响」的系数，不是随手写的增益 —— 改它之前先读 `docs/research/lofi-drums.md`。
 
 > 力度（velocity）同时影响音量和低通截止 —— 轻敲不只是小声，是更闷。
 > 这是"真实感"最便宜也最有效的来源。
@@ -326,6 +331,7 @@ ffmpeg -i take.webm -af volumedetect -f null -      # RMS 与峰值
 | 新增一首曲子 | `bgm/compose.ts` 加一条 + `game.ts` 的 `SONGS` 加一条 |
 | 采样（换音色 / 加音域） | `public/assets/inst/…` + `bgm/samples.ts` 的 `SAMPLES` |
 | 对局音色、混响空间 | `sfx.ts` 的 `SPACES` / `BUS_DEF` / `INST` |
+| lofi 鼓的手感（软硬、胖瘦） | `lofi-kit.ts` 的 `BRIGHT` / `TAPE` 两套预设 |
 | 伴奏律动（鼓型、切分） | `backing.ts` 的 `GROOVE` |
 | 场景配色与氛围 | `scene.ts` 对应 shader 的 `renderScene()` |
 | 缓存策略、版本号 | `vite.config.ts` |

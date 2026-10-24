@@ -122,7 +122,7 @@ export const COMPOSE: Record<string, Composition> = {
     ]),
     comp: { type: 'arp8', inst: 'nylon', oct: 12, gain: 0.26 },
     bass: { type: 'half', inst: 'ebass', gain: 0.52 },
-    drums: { kit: 'acoustic', kick: [0, 10], snare: [4, 12], hat: 'off', open: [] },
+    drums: { kit: 'lofi', kick: [0, 10], snare: [4, 12], hat: 'off', open: [] },
     mix: { cut: 3200, lead: 0.44, comp: 0.26, bass: 0.52, vol: 1.5 },
     vinyl: 0.05,
     swing: 0.012,
@@ -144,7 +144,7 @@ export const COMPOSE: Record<string, Composition> = {
     ]),
     comp: { type: 'pick', inst: 'nylon', oct: 12, gain: 0.34 },
     bass: { type: 'root5', inst: 'nylon', gain: 0.46, oct: 0 },
-    drums: { kit: 'acoustic', kick: [0, 8], snare: [4, 12], hat: 'none', open: [] },
+    drums: { kit: 'lofi', kick: [0, 8], snare: [4, 12], hat: 'none', open: [] },
     mix: { cut: 8000, lead: 0.40, comp: 0.34, bass: 0.46, vol: 1.2 },
   },
 
@@ -185,6 +185,6 @@ export const FALLBACK_VOICE: Record<string, { inst: VoiceName; bass: VoiceName; 
   pixel: { inst: 'chipLead', bass: 'chipBass', cut: 8200, kit: 'chip' },
   cyber: { inst: 'pluck', bass: 'sub', cut: 7600, kit: 'kpr77' },
   classic: { inst: 'piano', bass: 'cello', cut: 11000, kit: 'acoustic' },
-  lofi: { inst: 'epiano', bass: 'ebass', cut: 3200, kit: 'acoustic' },
+  lofi: { inst: 'epiano', bass: 'ebass', cut: 3200, kit: 'lofi' },
   rock: { inst: 'egt', bass: 'ebass', cut: 5200, kit: 'acoustic' },
 };
