@@ -152,6 +152,10 @@ export function SettingsSheet({
           <Switch checked={s.sound} onCheckedChange={(v) => game.setSettings({ sound: v })} />
         </Row>
 
+        <Row label="背景音乐" hint="8bit 循环，演奏时自动静音">
+          <Switch checked={s.bgm} onCheckedChange={(v) => game.setSettings({ bgm: v })} />
+        </Row>
+
         {/* 地址栏那个安装图标受用户档案状态影响（装过、点过忽略、策略限制都会让它不再出现），
             所以给一个我们自己控制得了的入口 */}
         <div className="mt-4 rounded-md border border-border bg-white/[0.03] px-4 py-3">

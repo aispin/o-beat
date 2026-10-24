@@ -11,6 +11,7 @@ import { UpdateBar } from '@/components/UpdateBar';
 import { Toaster } from '@/components/ui/sonner';
 import { game } from '@/engine';
 import { useAppUpdate } from '@/hooks/useAppUpdate';
+import { useBgm } from '@/hooks/useBgm';
 import { useGame } from '@/hooks/useGame';
 import { useInstallPrompt } from '@/hooks/useInstallPrompt';
 import { storage } from '@/lib/storage';
@@ -29,6 +30,7 @@ export default function App() {
 
   const update = useAppUpdate();
   const install = useInstallPrompt();
+  useBgm(snap);
 
   useEffect(() => {
     // 首屏的呼吸 O 交给这里退场：effect 在首帧提交之后才跑，不会闪一下黑

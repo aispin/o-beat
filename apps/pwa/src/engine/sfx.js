@@ -49,6 +49,7 @@
     classic:  { dur: 2.5, decay: 2.3, damp: 0.38, pre: 0.028, wet: 0.42, tape: 0.000, dly: 0.000, dlyAmt: 0.00 },
     lofi:     { dur: 1.4, decay: 3.1, damp: 0.20, pre: 0.008, wet: 0.26, tape: 0.032, dly: 0.000, dlyAmt: 0.00 },
     rock:     { dur: 2.9, decay: 2.0, damp: 0.52, pre: 0.034, wet: 0.34, tape: 0.000, dly: 0.000, dlyAmt: 0.00 },
+    chip:     { dur: 1.1, decay: 2.6, damp: 0.14, pre: 0.004, wet: 0.14, tape: 0.000, dly: 0.000, dlyAmt: 0.00 },
     practice: { dur: 1.6, decay: 2.6, damp: 0.34, pre: 0.010, wet: 0.24, tape: 0.000, dly: 0.000, dlyAmt: 0.00 },
   };
 
@@ -417,12 +418,56 @@
     n.start(t); n.stop(t + 0.03);
   }
 
+  /* 芯片鼓组：正弦扫频底鼓 + 两段滤波噪声。
+     BGM 用的就是这一套参数 —— 8bit 的鼓本来就是合成的，
+     换成采样鼓反而不对味，所以这里不给它准备素材。 */
+  function chipDrum(name, t, v) {
+    const c = S.ac;
+
+    if (name === 'kick') {
+      const o = c.createOscillator(), g = c.createGain();
+      o.type = 'sine';
+      o.frequency.setValueAtTime(150, t);
+      o.frequency.exponentialRampToValueAtTime(48, t + 0.085);
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.34 * v, t + 0.004);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.21);
+      o.connect(g); g.connect(busOf('kick'));
+      o.start(t); o.stop(t + 0.23);
+      duck(t, 0.12);
+      return;
+    }
+
+    if (name === 'snare' || name === 'tom') {
+      const n = c.createBufferSource(); n.buffer = S.noise;
+      const bp = mk('filter', { type: 'bandpass', frequency: 1750, Q: 0.9 });
+      const g = c.createGain();
+      g.gain.setValueAtTime(0.12 * v, t);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.085);
+      n.connect(bp); bp.connect(g); g.connect(busOf('snare'));
+      n.start(t); n.stop(t + 0.10);
+      return;
+    }
+
+    const open = name === 'openhat';
+    const d = open ? 0.16 : 0.028;
+    const n = c.createBufferSource(); n.buffer = S.noise;
+    const hp = mk('filter', { type: 'highpass', frequency: 6800, Q: 0.7 });
+    const g = c.createGain();
+    g.gain.setValueAtTime((open ? 0.10 : 0.062) * v, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + d);
+    n.connect(hp); hp.connect(g); g.connect(busOf('hat'));
+    n.start(t, Math.random() * 0.12); n.stop(t + d + 0.02);
+  }
+
   function drum(name, t, opt) {
     if (!S.ac || S.mute) return;
     const o = opt || {};
     const v = o.gain == null ? 1 : o.gain;
     const kit = o.kit || S.kit;
     const pan = o.pan || 0;
+
+    if (kit === 'chip') { chipDrum(name, t, v); return; }
 
     if (name === 'kick') {
       const r = playBuf('drum:' + kit + ':kick', t, { gain: v * 1.05, pan, bus: 'kick', human: 0.006 });
@@ -698,6 +743,86 @@
     };
   }
 
+  /* 8bit 主音：一根方波，外加一层很轻的五度。
+     不挂滤波扫频、不做失谐 —— 芯片音源的性格就是「硬起音、利落收尾」，
+     越干净越像，加一点混响就够。 */
+  function chipLead(midi, t, o) {
+    const c = S.ac;
+    const f = mtof(midi);
+    const dur = o.dur || 0.34;
+    const v = o.gain == null ? 1 : o.gain;
+    const g = c.createGain();
+
+    const atk = 0.004;
+    const rel = Math.min(0.032, dur * 0.35);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.22 * v, t + atk);
+    g.gain.setValueAtTime(0.22 * v, t + Math.max(atk + 0.004, dur - rel));
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+
+    const oscs = [];
+    const main = c.createOscillator();
+    main.type = 'square';
+    main.frequency.value = f;
+    main.connect(g);
+    oscs.push(main);
+
+    // 五度只在听感舒服的音域里加：方波乘 1.5 上了 5k 就变成刺耳的蜂鸣
+    if (f * 1.5 < 5000) {
+      const fifth = c.createOscillator();
+      fifth.type = 'square';
+      fifth.frequency.value = f * 1.5;
+      const fg = c.createGain();
+      fg.gain.value = 0.10;
+      fifth.connect(fg);
+      fg.connect(g);
+      oscs.push(fifth);
+    }
+
+    const pan = panner(o.pan || 0);
+    if (pan) { g.connect(pan); pan.connect(busOf('lead')); } else g.connect(busOf('lead'));
+
+    oscs.forEach((n) => { n.start(t); n.stop(t + dur + 0.02); });
+    return {
+      stop: (at) => {
+        const x = at || now();
+        g.gain.cancelScheduledValues(x);
+        g.gain.setValueAtTime(Math.max(0.0001, g.gain.value), x);
+        g.gain.exponentialRampToValueAtTime(0.0001, x + 0.05);
+      },
+    };
+  }
+
+  // 8bit 贝斯：三角波。那个年代的低声部没有别的选择。
+  function chipBass(midi, t, o) {
+    const c = S.ac;
+    const dur = o.dur || 0.3;
+    const v = o.gain == null ? 1 : o.gain;
+    const g = c.createGain();
+
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.30 * v, t + 0.006);
+    g.gain.setValueAtTime(0.30 * v, t + Math.max(0.012, dur - 0.04));
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+
+    const osc = c.createOscillator();
+    osc.type = 'triangle';
+    osc.frequency.value = mtof(midi);
+    osc.connect(g);
+    g.connect(busOf('bass'));
+    osc.start(t);
+    osc.stop(t + dur + 0.02);
+
+    return {
+      stop: (at) => {
+        const x = at || now();
+        g.gain.cancelScheduledValues(x);
+        g.gain.setValueAtTime(Math.max(0.0001, g.gain.value), x);
+        g.gain.exponentialRampToValueAtTime(0.0001, x + 0.05);
+      },
+    };
+  }
+
   // 电吉他：拨弦模型 + 过载 + 箱体低通
   function guitar(midi, t, o) {
     return playKs(midi, t, {
@@ -786,7 +911,7 @@
     };
   }
 
-  const INST = { piano, rhodes, lead, guitar, bass, pad };
+  const INST = { piano, rhodes, lead, chipLead, chipBass, guitar, bass, pad };
 
   function note(inst, midi, t, opt) {
     if (!S.ac || S.mute) return null;

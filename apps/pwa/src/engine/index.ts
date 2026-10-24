@@ -7,6 +7,7 @@
 import './sfx.js';
 import './scene.js';
 import './backing.js';
+import './bgm.js';
 
 import {
   boot as bootEngine,
@@ -39,7 +40,7 @@ import {
 export type Mode = 'drummer' | 'melodist' | 'rhythm';
 export type Difficulty = 'casual' | 'normal' | 'strict';
 export type Phase = 'home' | 'playing' | 'paused' | 'result';
-export type SceneId = 'cyber' | 'classic' | 'lofi' | 'rock';
+export type SceneId = 'cyber' | 'classic' | 'lofi' | 'rock' | 'pixel';
 export type StyleId = 'straight' | 'swing' | 'bossa' | 'mathrock';
 
 export interface Settings {
@@ -48,6 +49,7 @@ export interface Settings {
   padOn: boolean;
   pitchJudge: boolean;
   sound: boolean;
+  bgm: boolean;
   sceneOn: boolean;
   timbre: string;
   style: StyleId;
@@ -114,6 +116,8 @@ export interface SongDef {
   scene: SceneId;
   bpm: number;
   meter: number;
+  /** 有固定编曲（谱面来自编曲旋律，而不是随机生成） */
+  arcade?: boolean;
 }
 
 export interface TimbreDef {
@@ -136,6 +140,25 @@ export const SONGS = SONGS_RAW as unknown as SongDef[];
 export const TIMBRES = TIMBRES_RAW as unknown as TimbreDef[];
 export const SCENES = SCENES_RAW as unknown as Record<SceneId, SceneDef>;
 export const RHYTHM_STEP = RHYTHM_STEP_RAW as number;
+
+/** 8bit 背景音乐。独立于「音效」开关：演奏时静音，首页和结算页循环。 */
+interface BgmApi {
+  play: () => void;
+  stop: () => void;
+  readonly running: boolean;
+}
+
+interface BgmWindow extends Window {
+  BGM?: BgmApi;
+}
+
+export const bgm: BgmApi = {
+  play: () => (window as unknown as BgmWindow).BGM?.play(),
+  stop: () => (window as unknown as BgmWindow).BGM?.stop(),
+  get running() {
+    return !!(window as unknown as BgmWindow).BGM?.running;
+  },
+};
 
 export const game = {
   boot: bootEngine as (opts: { stage: HTMLCanvasElement; glbg: HTMLCanvasElement }) => void,

@@ -30,6 +30,7 @@ const SCENES = {
   classic: { label: '音乐家的房间', a: '#FFB259', b: '#E0762F', glow: 'rgba(255,178,89,0.40)' },
   lofi:    { label: '慵懒房间', a: '#FFB066', b: '#7D9BC4', glow: 'rgba(255,176,102,0.36)' },
   rock:    { label: 'Live 舞台', a: '#FF4A3D', b: '#FFC98A', glow: 'rgba(255,74,61,0.44)' },
+  pixel:   { label: '像素世界', a: '#FFC24A', b: '#FF4FA3', glow: 'rgba(255,194,74,0.40)' },
 };
 
 /* 当前主题：CSS 用变量，Canvas 用 rgb 三元组，两边必须同源 */
@@ -99,6 +100,10 @@ const SONGS = [
   { id: 'breath',name: '长呼吸',   tag: '慵懒 · 长音', scene: 'lofi',    bpm: 64, meter: 4, root: 69, scale: 'min', chords: ['Am', 'F', 'C', 'G'] },
   { id: 'rain',  name: '雨窗午后', tag: '慵懒 · 五声', scene: 'lofi',    bpm: 68, meter: 4, root: 74, scale: 'maj', chords: ['D', 'G', 'A', 'D'] },
   { id: 'live',  name: '地下现场', tag: '摇滚 · 强拍', scene: 'rock',    bpm: 88, meter: 4, root: 72, scale: 'maj', chords: ['C', 'F', 'G', 'Am'] },
+  /* 唯一一首「有谱」的曲子：编曲来自 bgm.js 那份 8bit 循环。
+     旋律不预录，玩家打的每个音就是旋律本身。 */
+  { id: 'arcade',name: '像素心跳', tag: '8bit · 方波', scene: 'pixel',   bpm: 132, meter: 4, root: 69, scale: 'min', chords: ['Am', 'F', 'C', 'G'],
+    arcade: true, inst: 'chip', kit: 'chip', space: 'chip' },
 ];
 
 const NOTE_SEMI = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
@@ -220,6 +225,7 @@ const settings = Object.assign({
   padOn: true,
   pitchJudge: true,
   sound: true,
+  bgm: true,
   sceneOn: true,
   timbre: 'wood',
   style: 'straight',
@@ -262,9 +268,9 @@ const AudioEng = {
 
   init() {
     if (!window.SFX || !SFX.init()) return false;
-    const space = S.mode === 'rhythm' ? 'practice' : S.song.scene;
+    const space = S.mode === 'rhythm' ? 'practice' : (S.song.space || S.song.scene);
     SFX.setSpace(space);
-    SFX.setKit(SCENE_KIT[S.song.scene] || 'acoustic');
+    SFX.setKit(S.song.kit || SCENE_KIT[S.song.scene] || 'acoustic');
     SFX.setMute(!settings.sound);
     SFX.ensure();
     return true;
@@ -287,9 +293,11 @@ const AudioEng = {
       return null;
     }
     if (note.track === 'mel') {
-      const inst = SCENE_INST[S.song.scene] || 'piano';
-      const midi = S.song.root + PENTA[S.song.scale][note.col];
-      return SFX.note(inst, midi, t, { dur: 0.66, gain: 1 });
+      const inst = S.song.inst || SCENE_INST[S.song.scene] || 'piano';
+      /* 有谱曲目的音高写在音符上（绝对 MIDI），其它曲目按列取五声音阶。
+         八分音符的曲子用 0.66 秒的长度会糊，跟着十六分网格缩短。 */
+      const midi = note.midi == null ? S.song.root + PENTA[S.song.scale][note.col] : note.midi;
+      return SFX.note(inst, midi, t, { dur: S.song.arcade ? 0.22 : 0.66, gain: 1 });
     }
     // PAD 长音
     return SFX.note('pad', [S.song.root - 12, S.song.root - 5, S.song.root - 12 + 7], t, {
@@ -321,10 +329,52 @@ function sectionOf(bar) {
   return 3;
 }
 
+/* 鼓手模式的有谱谱面：打的就是编曲那套鼓 —— 底鼓 1/4/4&、军鼓 2/4。
+   位置和 backing.js 里 buildArcade 排的事件一一对应，所以敲下去
+   跟伴奏是同一个点，不会有"打到空处"的错位感。 */
+function buildArcadeDrumChart(song) {
+  const beat = 60 / song.bpm;
+  const sixteenth = beat / 4;
+  const barDur = beat * song.meter;
+  const notes = [];
+  let id = 0;
+  const push = (n) => { n.id = id++; n.status = 'pending'; n.grade = null; notes.push(n); };
+
+  const K = 0, SN = 1, CH = 2;
+  for (let bar = 0; bar < CFG.bars; bar++) {
+    const t0 = bar * barDur;
+    const add = (s, lane) => push({
+      track: 'drum', col: lane, time: t0 + s * sixteenth, dur: 0, type: 'tap',
+    });
+
+    add(0, K);
+    add(4, SN);
+    add(8, K);
+    add(12, SN);
+
+    if (S.diff !== 'casual') {
+      add(6, K);
+      for (let s = 0; s < 16; s += 2) add(s, CH);
+    }
+    if (S.diff === 'strict') {
+      add(2, K);
+      add(14, SN);
+    }
+  }
+
+  notes.sort((a, b) => a.time - b.time);
+  S.totalDur = CFG.bars * barDur;
+  return notes;
+}
+
 function buildChart() {
   S.rests = [];
   if (S.mode === 'rhythm') return buildRhythmChart();
   const song = S.song;
+  if (song.arcade) {
+    if (S.mode === 'melodist') return buildArcadeChart(song);
+    return buildArcadeDrumChart(song);
+  }
   const beat = 60 / song.bpm;
   const meter = song.meter;
   const barDur = beat * meter;
@@ -388,6 +438,63 @@ function buildChart() {
   }
 
   notes.sort((a, b) => a.time - b.time || a.track.localeCompare(b.track));
+  S.totalDur = CFG.bars * barDur;
+  return notes;
+}
+
+/* ============================================================
+   有谱曲目的谱面
+   ------------------------------------------------------------
+   音符直接来自编曲里的旋律行（bgm.js 的 MEL）：偶数十六分位上有音，
+   每小节最多 6 个。难度只决定「取几个」和「补不补加花」，不改音高 ——
+   所以三档弹的都是同一段旋律，区别只在密度和判定窗口。
+
+   列的排法用「本小节内音高的相对位置」：低的在左、高的在右。
+   这样不用看音名也能感觉到旋律在往上还是往下走。
+   ============================================================ */
+function buildArcadeChart(song) {
+  const sc = window.BGM && window.BGM.score;
+  if (!sc) return [];
+
+  const beat = 60 / song.bpm;
+  const sixteenth = beat / 4;
+  const barDur = beat * song.meter;
+  const notes = [];
+  let id = 0;
+  const push = (n) => { n.id = id++; n.status = 'pending'; n.grade = null; notes.push(n); };
+
+  for (let bar = 0; bar < CFG.bars; bar++) {
+    const src = bar % sc.bars;
+    const row = sc.mel[src];
+    const t0 = bar * barDur;
+
+    const pitches = row.filter((m) => m != null);
+    const lo = Math.min.apply(null, pitches);
+    const hi = Math.max.apply(null, pitches);
+    const colOf = (m) => (hi === lo ? 2 : clamp(Math.round(((m - lo) / (hi - lo)) * 4), 0, 4));
+
+    for (let s = 0; s < 16; s++) {
+      const m = row[s];
+      if (m == null) continue;
+      // 入门档只留每拍的头一个音，先把手放稳
+      if (S.diff === 'casual' && s % 4 !== 0) continue;
+      push({ track: 'mel', col: colOf(m), midi: m, time: t0 + s * sixteenth, dur: 0, type: 'tap' });
+    }
+
+    // 挑战档：末尾补两个和弦高音收花。位置选 12/14 而不是奇数位 ——
+    // 奇数位是伴奏琶音的地盘，撞在一起会糊成一片。
+    if (S.diff === 'strict') {
+      const chord = sc.chords[sc.prog[src]];
+      [12, 14].forEach((s, i) => {
+        push({
+          track: 'mel', col: 3 + i, midi: chord.tones[2] + 12,
+          time: t0 + s * sixteenth, dur: 0, type: 'tap',
+        });
+      });
+    }
+  }
+
+  notes.sort((a, b) => a.time - b.time);
   S.totalDur = CFG.bars * barDur;
   return notes;
 }

@@ -82,6 +82,8 @@
     song: null,
 
     build(song, bars, mode) {
+      if (mode === 'music' && song.arcade) return this.buildArcade(song, bars);
+
       const S = global.SFX;
       const g = GROOVE[song.scene] || GROOVE.lofi;
       const beat = 60 / song.bpm;
@@ -218,6 +220,58 @@
       this.events = ev;
       this.idx = 0;
       this.mode = mode;
+      return ev;
+    },
+
+    /* 固定编曲曲目：把 bgm.js 那份谱直接搬过来当伴奏。
+       ------------------------------------------------------------
+       旋律不在这里排 —— 玩家打的每个音就是旋律音，伴奏只负责贝斯、
+       琶音和鼓。所以漏音的时候这三层还在，音乐不会散成一地。
+       数据来自 BGM.score，和首页循环播放的是同一份定义。 */
+    buildArcade(song, bars) {
+      const S = global.SFX;
+      const sc = global.BGM && global.BGM.score;
+      if (!sc) { this.events = []; this.idx = 0; this.mode = 'music'; return []; }
+
+      const beat = 60 / song.bpm;
+      const sixteenth = beat / 4;
+      const barDur = beat * song.meter;
+      const ev = [];
+      const push = (bar, s, fn, arg) => {
+        ev.push({ at: bar * barDur + s * sixteenth, fn, arg });
+      };
+
+      for (let bar = 0; bar < bars; bar++) {
+        const src = bar % sc.bars;
+        const chord = sc.chords[sc.prog[src]];
+
+        // 贝斯：八个八分位，根音 / 五度 / 高八度
+        sc.bassOct.forEach((semi, k) => {
+          push(bar, k * 2, (t, n) => {
+            S.note('chipBass', n, t, { dur: sixteenth * 1.7, gain: 0.9 });
+          }, chord.root + semi);
+        });
+
+        // 琶音：奇数十六分位填空，音量压到刚能听出「有和声」
+        for (let s = 1; s < 16; s += 2) {
+          const idx = sc.arpOrder[((s - 1) / 2) % sc.arpOrder.length];
+          push(bar, s, (t, n) => {
+            S.note('chipLead', n, t, { dur: sixteenth * 0.85, gain: 0.16, pan: 0.22 });
+          }, chord.tones[idx] + 12);
+        }
+
+        // 鼓：底鼓 1/4/4&、军鼓 2/4、踩镲八分位
+        [0, 6, 8].forEach((s) => push(bar, s, (t) => S.drum('kick', t, { gain: 0.9, kit: 'chip' })));
+        [4, 12].forEach((s) => push(bar, s, (t) => S.drum('snare', t, { gain: 1, kit: 'chip' })));
+        for (let s = 0; s < 16; s += 2) {
+          push(bar, s, (t, g) => S.drum('hat', t, { gain: g, kit: 'chip' }), s === 0 ? 0.75 : 0.52);
+        }
+      }
+
+      ev.sort((a, b) => a.at - b.at);
+      this.events = ev;
+      this.idx = 0;
+      this.mode = 'music';
       return ev;
     },
 

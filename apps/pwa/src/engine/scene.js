@@ -384,7 +384,77 @@
     '}',
   ].join('\n');
 
-  const SOURCES = { cyber: CYBER, classic: CLASSIC, lofi: LOFI, rock: ROCK };
+  /* ---------------- 像素 · 像素世界 ----------------
+     整幅画面先在 64 格粗网格上取样，最后限成 7 级色阶。
+     太阳、山、网格地面、星星全都写在网格坐标里，所以台阶感是
+     算出来的而不是后期描的 —— 换个分辨率也不会忽粗忽细。 */
+  const PIXEL = [
+    'vec3 renderScene(vec2 uv, vec2 p, float t){',
+    '  float GRID = max(4.0, uRes.x / 64.0);',
+    '  vec2 uq = (floor(gl_FragCoord.xy / GRID) * GRID + GRID * 0.5) / uRes;',
+    '  float hz = 0.42;',
+    '  float up = uq.y - hz;',
+
+    // 天空：地平线橙 → 洋红 → 深紫，三段压色
+    '  float st = clamp(up / (1.0 - hz), 0.0, 1.0);',
+    '  vec3 col = mix(vec3(1.00, 0.66, 0.30), vec3(0.78, 0.22, 0.50), smoothstep(0.0, 0.26, st));',
+    '  col = mix(col, vec3(0.085, 0.038, 0.165), smoothstep(0.24, 0.80, st));',
+
+    // 星：稀疏亮点，缓慢明灭
+    '  vec2 sc = floor(uq * vec2(58.0, 40.0));',
+    '  float star = step(0.985, h21(sc));',
+    '  float tw = 0.45 + 0.55 * sin(t * 2.6 + h21(sc + 5.0) * 6.283);',
+    '  col += vec3(1.0, 0.94, 0.82) * star * tw * smoothstep(0.08, 0.34, up) * 1.05;',
+
+    // 太阳：像素圆，下半部被横条切开
+    '  vec2 sd = (uq - vec2(0.50, hz + 0.155)) * vec2(1.0, 1.30);',
+    '  float sr = 0.150;',
+    '  float dist = length(sd);',
+    '  float low = step(uq.y, hz + 0.155) * step(0.45, fract((hz + 0.155 - uq.y) * 18.0));',
+    '  float sunMask = step(dist, sr) * (1.0 - low);',
+    '  vec3 sunCol = mix(vec3(1.0, 0.52, 0.28), vec3(1.0, 0.94, 0.55), smoothstep(hz - 0.02, hz + 0.33, uq.y));',
+    // 演奏时把太阳压下去：音符是暖黄色的，正对着落日会糊在一起
+    '  sunCol *= 1.0 - 0.22 * uDim;',
+    '  col = mix(col, sunCol, sunMask);',
+    '  col += vec3(0.40, 0.15, 0.06) * exp(-max(dist - sr, 0.0) * 7.0) * 0.5;',
+
+    // 远山 / 近山：两层台阶剪影，各自的高度用两段正弦叠出锯齿
+    '  float mh = hz + 0.030 + 0.048 * abs(sin(uq.x * 7.3 + 2.1)) + 0.016 * abs(sin(uq.x * 19.0));',
+    '  col = mix(col, vec3(0.165, 0.058, 0.225), step(uq.y, mh) * step(hz - 0.004, uq.y));',
+    '  float nh = hz + 0.016 + 0.028 * abs(sin(uq.x * 11.0 + 0.7)) + 0.010 * abs(sin(uq.x * 27.0 + 1.3));',
+    '  col = mix(col, vec3(0.070, 0.024, 0.118), step(uq.y, nh) * step(hz - 0.004, uq.y));',
+
+    // 地平线光带：把天和地咬在一起
+    '  col += vec3(1.0, 0.45, 0.28) * exp(-abs(up) * 24.0) * 0.45;',
+
+    // 透视网格地面
+    '  if (uq.y < hz) {',
+    '    float d = hz - uq.y;',
+    // z 是「屏幕纵深」：靠近地平线时封顶，否则 1/d 会冲到几十，
+    // 量化成 6px 格子后整片糊成马赛克带
+    '    float z = min(0.40 / (d + 0.030), 7.0);',
+    '    vec2 g = vec2((uq.x - 0.5) * z * 1.7, z * 0.80 + t * 0.85);',
+    '    vec2 f = abs(fract(g) - 0.5);',
+    '    float line = step(min(f.x, f.y), 0.06);',
+    '    vec3 neon = mix(vec3(1.0, 0.30, 0.72), vec3(0.40, 0.86, 1.0), smoothstep(-0.22, 0.22, p.x));',
+    '    col = mix(vec3(0.090, 0.032, 0.140), vec3(0.042, 0.014, 0.076), smoothstep(0.0, hz, d));',
+    // 地平线附近网格本就该密到看不见，淡出比硬画干净
+    '    float fade = smoothstep(0.006, 0.075, d);',
+    '    col += neon * line * (0.42 + uPulse * 0.70 + uEnergy * 0.38) * fade;',
+    '    col += neon * line * line * 0.30 * fade;',
+    '  }',
+
+    // CRT：隔行暗带，像素游戏的显示器味
+    '  col *= 0.88 + 0.12 * step(0.5, fract(gl_FragCoord.y / 3.0));',
+
+    // 限色：7 级一档，这是"像素画"和"低分辨率照片"的分界线
+    '  col = floor(col * 7.0 + 0.5) / 7.0;',
+
+    '  return col;',
+    '}',
+  ].join('\n');
+
+  const SOURCES = { cyber: CYBER, classic: CLASSIC, lofi: LOFI, rock: ROCK, pixel: PIXEL };
 
   /* ---------------- 引擎 ---------------- */
   const Scene = {
