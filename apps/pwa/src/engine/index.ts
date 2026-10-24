@@ -7,7 +7,8 @@
 import './sfx.js';
 import './scene.js';
 import './backing.js';
-import './bgm.js';
+
+export { bgm } from './bgm';
 
 import {
   boot as bootEngine,
@@ -148,30 +149,8 @@ export const TIMBRES = TIMBRES_RAW as unknown as TimbreDef[];
 export const SCENES = SCENES_RAW as unknown as Record<SceneId, SceneDef>;
 export const RHYTHM_STEP = RHYTHM_STEP_RAW as number;
 
-/** 背景音乐。独立于「音效」开关：演奏时静音，首页和结算页循环。 */
-interface BgmApi {
-  /** 换曲目：速度、和弦、音色一起换，运行中会交叉淡入淡出 */
-  setSong: (song: SongDef) => void;
-  play: () => void;
-  stop: () => void;
-  /** 取一段时域波形（-1..1），返回 false 表示此刻没在响 */
-  waveform: (out: Float32Array) => boolean;
-  readonly running: boolean;
-}
-
-interface BgmWindow extends Window {
-  BGM?: BgmApi;
-}
-
-export const bgm: BgmApi = {
-  setSong: (song) => (window as unknown as BgmWindow).BGM?.setSong(song),
-  play: () => (window as unknown as BgmWindow).BGM?.play(),
-  stop: () => (window as unknown as BgmWindow).BGM?.stop(),
-  waveform: (out) => (window as unknown as BgmWindow).BGM?.waveform(out) ?? false,
-  get running() {
-    return !!(window as unknown as BgmWindow).BGM?.running;
-  },
-};
+/* 背景音乐已经拆成 TS 模块（src/engine/bgm/），这里只做转出：
+   UI 不该知道它内部是怎么分层的。 */
 
 export const game = {
   boot: bootEngine as (opts: { stage: HTMLCanvasElement; glbg: HTMLCanvasElement }) => void,

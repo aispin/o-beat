@@ -202,11 +202,21 @@ export default defineConfig(({ mode }) => ({
         ],
       },
       workbox: {
-        // 采样一共 312KB，直接进 precache：离线也能完整玩，不用等第二轮下载
-        globPatterns: ['**/*.{js,css,svg,png,ico,mp3,woff2}'],
+        /* 采样（钢琴与六件乐器，约 1.4MB）**不进** precache。
+           首页默认那首是芯片音，一个采样都不需要；用户切到别的曲子时
+           才按需拉当前这套（100–200KB）。全塞进 precache 等于让每个装
+           PWA 的人都先下一遍所有乐器的音。 */
+        globPatterns: ['**/*.{js,css,svg,png,ico,woff2}'],
         // version.json 绝不能进缓存，否则「检查更新」永远拿到旧值；
         // 分享图和安装截图只有浏览器 UI 和社交爬虫会要，不占用户的离线配额
-        globIgnores: ['**/version.json', '**/og.png', '**/screenshots/**'],
+        globIgnores: [
+          '**/version.json',
+          '**/og.png',
+          '**/screenshots/**',
+          '**/assets/piano/**',
+          '**/assets/inst/**',
+          '**/assets/drums/**',
+        ],
         /* HTML 不进 precache，导航走 NetworkFirst（见下面的 runtimeCaching）。
            把 index.html 也塞进 precache 是 PWA 更新最容易踩的坑：SW 会用缓存的旧壳
            响应导航，而旧壳引用的带 hash 的资源早随新构建删了 —— 用户看到的是白屏，
@@ -218,6 +228,16 @@ export default defineConfig(({ mode }) => ({
            换到只要带 ?sharecode 才给 HTML 的托管上，刷新一次就会掉进网关的错误页 */
         clientsClaim: true,
         runtimeCaching: [
+          {
+            /* 采样：拉过一次就长期留着。文件名带音名、内容不随版本变，
+               所以 CacheFirst 不会拿不到新音色 —— 换音色是换文件名。 */
+            urlPattern: /\/assets\/(piano|inst|drums)\//,
+            handler: 'CacheFirst' as const,
+            options: {
+              cacheName: 'omb-samples',
+              expiration: { maxEntries: 90, maxAgeSeconds: 60 * 60 * 24 * 180 },
+            },
+          },
           {
             urlPattern: ({ request }: { request: Request }) => request.mode === 'navigate',
             handler: 'NetworkFirst' as const,
