@@ -1,0 +1,572 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>lofi drum lab</title>
+<script>
+/* ============================================================
+   Lofi 鼓组合成实验台
+   ------------------------------------------------------------
+   全部用 WebAudio 1.0 节点，跑在 OfflineAudioContext 里，
+   渲染结果与线上引擎听到的是同一套 API 行为。
+   每个 case 返回一段 base64 WAV。
+   ============================================================ */
+
+const SR = 44100;
+/* 采样直接从应用目录取，避免在文档目录里复制一份 88KB 的鼓 */
+const SAMPLE_BASE = '/apps/pwa/public/assets/drums/';
+const BPM = 68;
+const BEAT = 60 / BPM;
+
+function mulberry(seed) {
+  return function () {
+    seed |= 0; seed = (seed + 0x6D2B79F5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/* ---------- 素材 ---------- */
+
+function whiteNoise(ctx, dur) {
+  const n = Math.ceil(ctx.sampleRate * dur);
+  const b = ctx.createBuffer(1, n, ctx.sampleRate);
+  const d = b.getChannelData(0);
+  for (let i = 0; i < n; i++) d[i] = Math.random() * 2 - 1;
+  return b;
+}
+
+/* 粉噪：能量往低中频偏，尾巴比白噪"暖"，是 lofi 军鼓的关键之一 */
+function pinkNoise(ctx, dur) {
+  const n = Math.ceil(ctx.sampleRate * dur);
+  const b = ctx.createBuffer(1, n, ctx.sampleRate);
+  const d = b.getChannelData(0);
+  let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
+  for (let i = 0; i < n; i++) {
+    const w = Math.random() * 2 - 1;
+    b0 = 0.99886 * b0 + w * 0.0555179;
+    b1 = 0.99332 * b1 + w * 0.0750759;
+    b2 = 0.96900 * b2 + w * 0.1538520;
+    b3 = 0.86650 * b3 + w * 0.3104856;
+    b4 = 0.55000 * b4 + w * 0.5329522;
+    b5 = -0.7616 * b5 - w * 0.0168980;
+    d[i] = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + w * 0.5362) * 0.11;
+    b6 = w * 0.115926;
+  }
+  return b;
+}
+
+/* 软饱和 + 可选位深量化（磁带/采样器的"脏"） */
+function curveTanh(drive, bits) {
+  const n = 4096, c = new Float32Array(n);
+  const norm = Math.tanh(drive);
+  for (let i = 0; i < n; i++) {
+    const x = (i / (n - 1)) * 2 - 1;
+    let y = Math.tanh(x * drive) / norm;
+    if (bits) { const q = Math.pow(2, bits - 1); y = Math.round(y * q) / q; }
+    c[i] = y;
+  }
+  return c;
+}
+
+function sat(ctx, drive, bits) {
+  const w = ctx.createWaveShaper();
+  w.curve = curveTanh(drive, bits);
+  w.oversample = '2x';
+  return w;
+}
+
+function bq(ctx, type, freq, q) {
+  const f = ctx.createBiquadFilter();
+  f.type = type; f.frequency.value = freq;
+  if (q != null) f.Q.value = q;
+  return f;
+}
+
+function gainNode(ctx, v) { const g = ctx.createGain(); g.gain.value = v; return g; }
+
+/* 短混响：噪声脉冲 + 指数衰减 + 一阶低通，模拟小房间 */
+function roomIR(ctx, dur, decay, damp) {
+  const n = Math.ceil(ctx.sampleRate * dur);
+  const b = ctx.createBuffer(2, n, ctx.sampleRate);
+  for (let ch = 0; ch < 2; ch++) {
+    const d = b.getChannelData(ch);
+    let lp = 0;
+    for (let i = 0; i < n; i++) {
+      const env = Math.pow(1 - i / n, decay);
+      const v = (Math.random() * 2 - 1) * env;
+      lp = lp * damp + v * (1 - damp);
+      d[i] = lp;
+    }
+  }
+  return b;
+}
+
+/* ============================================================
+   鼓件合成
+   ============================================================ */
+
+function env(g, t, peak, attack, hold, decay) {
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(Math.max(0.0002, peak), t + attack);
+  if (hold > 0) g.gain.setValueAtTime(Math.max(0.0002, peak * 0.86), t + attack + hold);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + attack + hold + decay);
+}
+
+/* 军鼓
+   p.body      鼓皮基频（Hz），lofi 一般 165–200
+   p.bodyAmt   鼓皮音量
+   p.modes     [倍频, 权重]，两圆膜模态 1 : 1.58
+   p.noiseAmt  响弦音量
+   p.bp/q      响弦的带通中心与 Q
+   p.lp        整条链低通（决定"脆"还是"软"）
+   p.attack    起音时间（决定"硬"还是"钝"）
+   p.drive     饱和量
+*/
+function snareSynth(ctx, t, dest, p) {
+  const out = gainNode(ctx, p.amp == null ? 0.9 : p.amp);
+  const lp = bq(ctx, 'lowpass', p.lp, 0.7);
+  const hp = bq(ctx, 'highpass', p.hp == null ? 90 : p.hp, 0.7);
+  const chain = sat(ctx, p.drive, p.bits);
+  out.connect(chain); chain.connect(lp); lp.connect(hp); hp.connect(dest);
+
+  const modes = p.modes || [[1, 1], [1.58, 0.45]];
+  const toneDecay = p.toneDecay == null ? 0.17 : p.toneDecay;
+  const attack = p.attack == null ? 0.004 : p.attack;
+  modes.forEach(function (m) {
+    const o = ctx.createOscillator();
+    o.type = p.wave || 'sine';
+    const f = p.body * m[0];
+    o.frequency.setValueAtTime(f * 1.14, t);
+    o.frequency.exponentialRampToValueAtTime(f, t + 0.035);
+    o.frequency.exponentialRampToValueAtTime(f * 0.982, t + attack + toneDecay);
+    const g = ctx.createGain();
+    env(g, t, (p.bodyAmt || 0) * m[1], attack, 0, toneDecay * (m[0] > 1.2 ? 0.55 : 1));
+    o.connect(g); g.connect(out);
+    o.start(t); o.stop(t + attack + toneDecay + 0.05);
+  });
+
+  const layers = p.layers || (p.noiseAmt > 0 ? [{ bp: p.bp || 2300, q: p.q == null ? 0.8 : p.q, amt: p.noiseAmt, decay: p.noiseDecay == null ? 0.2 : p.noiseDecay, hp: p.nhp == null ? 650 : p.nhp }] : []);
+  layers.forEach(function (L) {
+    const src = ctx.createBufferSource();
+    src.buffer = p.pink ? PINK(ctx) : WHITE(ctx);
+    const bp = bq(ctx, 'bandpass', L.bp, L.q == null ? 0.8 : L.q);
+    const nhp = bq(ctx, 'highpass', L.hp == null ? 650 : L.hp, 0.7);
+    const ng = gainNode(ctx, 1);
+    const nd = L.decay == null ? 0.2 : L.decay;
+    const at = L.attack == null ? attack : L.attack;
+    ng.gain.setValueAtTime(0.0001, t);
+    ng.gain.exponentialRampToValueAtTime(L.amt, t + at);
+    ng.gain.exponentialRampToValueAtTime(L.amt * (L.tail == null ? 0.34 : L.tail), t + at + 0.055);
+    ng.gain.exponentialRampToValueAtTime(0.0001, t + at + nd);
+    src.connect(bp); bp.connect(nhp); nhp.connect(ng); ng.connect(out);
+    src.start(t, Math.random() * 0.4); src.stop(t + at + nd + 0.05);
+  });
+  return out;
+}
+
+/* 底鼓：正弦扫频 + 极短"槌头"噪声 */
+function kickSynth(ctx, t, dest, p) {
+  const out = gainNode(ctx, p.amp == null ? 1 : p.amp);
+  const lp = bq(ctx, 'lowpass', p.lp || 5200, 0.7);
+  const chain = sat(ctx, p.drive || 1.5);
+  out.connect(chain); chain.connect(lp); lp.connect(dest);
+
+  const o = ctx.createOscillator();
+  o.type = 'sine';
+  o.frequency.setValueAtTime(p.f0 || 108, t);
+  o.frequency.exponentialRampToValueAtTime(p.f1 || 46, t + (p.sweep || 0.085));
+  o.frequency.exponentialRampToValueAtTime((p.f1 || 46) * 0.96, t + (p.decay || 0.4));
+  const g = gainNode(ctx, 0.0001);
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(1, t + (p.attack || 0.004));
+  g.gain.exponentialRampToValueAtTime(0.0001, t + (p.attack || 0.004) + (p.decay || 0.4));
+  o.connect(g); g.connect(out);
+  o.start(t); o.stop(t + (p.decay || 0.4) + 0.05);
+
+  if (p.click !== 0) {
+    const n = ctx.createBufferSource(); n.buffer = WHITE(ctx);
+    const clp = bq(ctx, 'lowpass', p.clickLp || 1600, 0.8);
+    const cg = gainNode(ctx, 1);
+    cg.gain.setValueAtTime(p.click == null ? 0.08 : p.click, t);
+    cg.gain.exponentialRampToValueAtTime(0.0001, t + 0.012);
+    n.connect(clp); clp.connect(cg); cg.connect(out);
+    n.start(t, Math.random() * 0.3); n.stop(t + 0.02);
+  }
+  return out;
+}
+
+/* 踩镲：粉噪带通 + 可选金属振荡器（808 式的非谐和方波群） */
+function hatSynth(ctx, t, dest, p) {
+  const open = !!p.open;
+  const dur = open ? (p.decay || 0.28) : (p.decay || 0.052);
+  const out = gainNode(ctx, p.amp == null ? 0.5 : p.amp);
+  const hp = bq(ctx, 'highpass', p.hp || 5000, 0.7);
+  const lp = bq(ctx, 'lowpass', p.lp || 12000, 0.7);
+  out.connect(hp); hp.connect(lp); lp.connect(dest);
+
+  if (p.metal) {
+    const ratios = [2, 3.03, 4.7, 5.43, 6.79, 8.17];
+    ratios.forEach(function (r, i) {
+      const o = ctx.createOscillator();
+      o.type = 'square';
+      o.frequency.value = 320 * r * (p.tune || 1);
+      const g = gainNode(ctx, 0.05 * (1 - i / 8));
+      const bp = bq(ctx, 'bandpass', p.metalFreq || 7800, 2.2);
+      o.connect(bp); bp.connect(g); g.connect(out);
+      o.start(t); o.stop(t + dur + 0.05);
+    });
+  }
+
+  /* 两层：短促的"嗒" + 低电平的余响，模拟镲片本身的振动与房间 */
+  const layers = p.layers || [{ bp: p.bp || 7600, q: p.q == null ? 0.9 : p.q, amt: p.noiseAmt == null ? 0.55 : p.noiseAmt, decay: dur }];
+  layers.forEach(function (L) {
+    const src = ctx.createBufferSource();
+    src.buffer = p.white ? WHITE(ctx) : PINK(ctx);
+    const bp = bq(ctx, 'bandpass', L.bp, L.q == null ? 0.9 : L.q);
+    const g = gainNode(ctx, 1);
+    const at = p.attack == null ? 0.003 : p.attack;
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(L.amt, t + at);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + at + L.decay);
+    src.connect(bp); bp.connect(g); g.connect(out);
+    src.start(t, Math.random() * 0.4); src.stop(t + at + L.decay + 0.08);
+  });
+  return out;
+}
+
+/* 电钢（只作和声垫，判断鼓在音乐里合不合） */
+function rhodes(ctx, t, dest, midi, dur, amp) {
+  const f = 440 * Math.pow(2, (midi - 69) / 12);
+  const out = gainNode(ctx, amp == null ? 0.06 : amp);
+  const lp = bq(ctx, 'lowpass', 2600, 0.6);
+  out.connect(lp); lp.connect(dest);
+  const carrier = ctx.createOscillator();
+  carrier.type = 'sine'; carrier.frequency.value = f;
+  const mod = ctx.createOscillator();
+  mod.type = 'sine'; mod.frequency.value = f * 2.01;
+  const modGain = gainNode(ctx, f * 1.6);
+  mod.connect(modGain); modGain.connect(carrier.frequency);
+  const g = gainNode(ctx, 0.0001);
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(1, t + 0.012);
+  g.gain.exponentialRampToValueAtTime(0.28, t + dur * 0.5);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  carrier.connect(g); g.connect(out);
+  carrier.start(t); carrier.stop(t + dur + 0.02);
+  mod.start(t); mod.stop(t + dur + 0.02);
+  return carrier;
+}
+
+/* ---------- 噪声缓存（同一上下文内复用） ---------- */
+const W = new WeakMap();
+function WHITE(ctx) {
+  let m = W.get(ctx); if (!m) { m = {}; W.set(ctx, m); }
+  if (!m.white) m.white = whiteNoise(ctx, 2.2);
+  return m.white;
+}
+function PINK(ctx) {
+  let m = W.get(ctx); if (!m) { m = {}; W.set(ctx, m); }
+  if (!m.pink) m.pink = pinkNoise(ctx, 2.2);
+  return m.pink;
+}
+
+/* ============================================================
+   鼓组 & 场景
+   ============================================================ */
+
+const KIT_SAMPLE = 'kpr77';
+const KIT_SYNTH = {
+  kick:  { f0: 108, f1: 45, sweep: 0.09, decay: 0.38, attack: 0.004, click: 0.09, clickLp: 1500, drive: 1.5, lp: 5000, amp: 1.3 },
+  snare: { body: 186, bodyAmt: 0.40, modes: [[1, 1], [1.58, 0.45]], toneDecay: 0.19,
+           layers: [
+             { bp: 900,  q: 1.0, amt: 0.16, decay: 0.25, hp: 320 },
+             { bp: 2600, q: 0.70, amt: 0.20, decay: 0.23, hp: 900 },
+             { bp: 7200, q: 0.60, amt: 0.055, decay: 0.07, hp: 4200 },
+           ],
+           attack: 0.004, lp: 6000, hp: 95, drive: 1.7, pink: true, amp: 0.95 },
+  hat:   { layers: [{ bp: 7800, q: 0.7, amt: 0.9, decay: 0.062 }, { bp: 6200, q: 0.9, amt: 0.40, decay: 0.26 }],
+           hp: 4800, lp: 11500, amp: 1.8 },
+  open:  { layers: [{ bp: 7600, q: 0.6, amt: 0.8, decay: 0.16 }, { bp: 6000, q: 0.8, amt: 0.3, decay: 0.34 }],
+           hp: 4600, lp: 11000, amp: 1.6, open: true },
+};
+
+const GROOVE = {
+  kick: [0, 1.75, 2.5],
+  snare: [1, 3],
+  ghost: [[1.75, 1], [3.5, 1]],   // 幽灵音：位置（拍）, 力度
+  hats: 2,                         // 每拍 2 个八分
+  swing: 0.07,
+  human: 0.006,
+};
+
+/* 主输出链：高切 → 饱和 → 低通（磁带）→ 压缩 */
+function masterBus(ctx, dest, opts) {
+  const hp = bq(ctx, 'highpass', 35, 0.6);
+  const drive = sat(ctx, opts.drive == null ? 1.25 : opts.drive, opts.bits);
+  const lp = bq(ctx, 'lowpass', opts.lp == null ? 7200 : opts.lp, 0.6);
+  const comp = ctx.createDynamicsCompressor();
+  comp.threshold.value = -20; comp.knee.value = 8; comp.ratio.value = 2.6;
+  comp.attack.value = 0.008; comp.release.value = 0.18;
+  const g = gainNode(ctx, opts.gain == null ? 0.9 : opts.gain);
+  hp.connect(drive); drive.connect(lp); lp.connect(comp); comp.connect(g); g.connect(dest);
+  return hp;
+}
+
+function renderGroove(kind, bars, withKeys, dark) {
+  const barDur = BEAT * 4;
+  const total = bars * barDur + 2.2;
+  const ctx = new OfflineAudioContext({ numberOfChannels: 2, length: Math.ceil(total * SR), sampleRate: SR });
+  const master = ctx.createGain(); master.gain.value = 1;
+  master.connect(ctx.destination);
+  const bus = masterBus(ctx, master, { drive: dark ? 1.5 : 1.2, lp: dark ? 5200 : 7200, gain: dark ? 0.75 : 0.85 });
+
+  const rev = ctx.createConvolver();
+  rev.buffer = roomIR(ctx, 0.55, 3.4, 0.55);
+  const revGain = gainNode(ctx, 0.16);
+  rev.connect(revGain); revGain.connect(bus);
+  const revSend = gainNode(ctx, 1);
+  revSend.connect(rev);
+
+  const rnd = mulberry(7);
+  function h() { return (rnd() * 2 - 1) * GROOVE.human; }
+
+  let samples = null;
+  if (kind === 'sample') samples = window.__SAMPLES;
+
+  const kit = KIT_SYNTH;
+  function kick(t, v) {
+    if (t < 0) t = 0;
+    if (samples) {
+      const s = ctx.createBufferSource(); s.buffer = samples.kick;
+      const g = gainNode(ctx, 1.0 * v); const l = bq(ctx, 'lowpass', 5000, 0.7);
+      s.connect(g); g.connect(l); l.connect(bus); l.connect(revSend);
+      s.start(t);
+    } else {
+      const out = kickSynth(ctx, t, bus, Object.assign({}, kit.kick, { amp: kit.kick.amp * v * 0.85 }));
+      out.connect(revSend);
+    }
+  }
+  function snare(t, v) {
+    if (t < 0) t = 0;
+    if (samples) {
+      const s = ctx.createBufferSource(); s.buffer = samples.snare;
+      const g = gainNode(ctx, 0.9 * v);
+      s.connect(g); g.connect(bus); g.connect(revSend);
+      s.start(t);
+    } else {
+      const sp = dark ? Object.assign({}, kit.snare, {
+        body: 165, attack: 0.008, toneDecay: 0.24, lp: 5000,
+        layers: [
+          { bp: 850,  q: 1.0, amt: 0.15, decay: 0.30, hp: 300 },
+          { bp: 2400, q: 0.65, amt: 0.18, decay: 0.28, hp: 850 },
+          { bp: 6500, q: 0.6, amt: 0.04, decay: 0.10, hp: 4000 },
+        ],
+      }) : kit.snare;
+      const out = snareSynth(ctx, t, bus, Object.assign({}, sp, { amp: (sp.amp || 1) * v * 0.95 }));
+      out.connect(revSend);
+    }
+  }
+  function hat(t, v, open) {
+    if (t < 0) t = 0;
+    if (samples) {
+      const s = ctx.createBufferSource(); s.buffer = samples.hihat;
+      s.playbackRate.value = open ? 0.62 : 1.0;
+      const g = gainNode(ctx, 1);
+      const d = open ? 0.42 : 0.09;
+      g.gain.setValueAtTime((open ? 0.34 : 0.46) * v, t);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + d);
+      s.connect(g); g.connect(bus); g.connect(revSend);
+      s.start(t);
+    } else {
+      const p = Object.assign({}, open ? kit.open : kit.hat, { amp: (open ? kit.open.amp : kit.hat.amp) * v * 0.62 });
+      const out = hatSynth(ctx, t, bus, p);
+      out.connect(revSend);
+    }
+  }
+
+  for (let bar = 0; bar < bars; bar++) {
+    const b0 = bar * barDur;
+    const fill = bar % 4 === 3;
+    GROOVE.kick.forEach(function (pos) {
+      const t = b0 + pos * BEAT + h();
+      kick(t, 0.96 + rnd() * 0.08);
+    });
+    if (fill) kick(b0 + 3.75 * BEAT + h(), 0.7);
+    GROOVE.snare.forEach(function (pos) {
+      snare(b0 + pos * BEAT + h(), 0.92 + rnd() * 0.1);
+    });
+    GROOVE.ghost.forEach(function (gp) {
+      if (rnd() < 0.55) snare(b0 + (gp[0] % 2 === 0 ? gp[0] : gp[0]) * BEAT + h(), 0.18 + rnd() * 0.08);
+    });
+    for (let i = 0; i < 8; i++) {
+      const pos = i / 2;
+      const swingOff = (i % 2 === 1 ? GROOVE.swing * BEAT * 0.5 : 0);
+      const open = i === 7 && bar % 2 === 1;
+      hat(b0 + pos * BEAT + swingOff + h(), 0.55 + (i % 2 === 0 ? 0.2 : 0) + rnd() * 0.1, open);
+    }
+  }
+
+  if (withKeys) {
+    const chords = [[57, 60, 64, 67], [53, 57, 60, 64], [57, 60, 64, 67], [55, 59, 62, 65]];
+    for (let bar = 0; bar < bars; bar++) {
+      const ch = chords[bar % 4];
+      ch.forEach(function (m) { rhodes(ctx, bar * barDur + 0.02, bus, m, barDur * 0.92, 0.055); });
+      rhodes(ctx, bar * barDur + 0.02, bus, ch[0] - 24, barDur * 0.9, 0.05);
+    }
+  }
+  return ctx.startRendering();
+}
+
+/* 单次击打：给对比用 */
+function renderHits(list) {
+  const gap = 1.35;
+  const total = list.length * gap + 1.4;
+  const ctx = new OfflineAudioContext({ numberOfChannels: 2, length: Math.ceil(total * SR), sampleRate: SR });
+  const bus = masterBus(ctx, ctx.destination, { drive: 1.15, lp: 7500, gain: 0.8 });
+  const rev = ctx.createConvolver(); rev.buffer = roomIR(ctx, 0.55, 3.4, 0.55);
+  const revGain = gainNode(ctx, 0.16); rev.connect(revGain); revGain.connect(bus);
+  const send = gainNode(ctx, 1); send.connect(rev);
+  list.forEach(function (item, i) {
+    const t = 0.15 + i * gap;
+    item(ctx, t, bus, send);
+  });
+  return ctx.startRendering();
+}
+
+/* 各个击打方案的构造函数：签名 (ctx,t,main,rev) */
+function hitSample(name, rate, lp, amp) {
+  return function (ctx, t, bus, rev) {
+    const s = ctx.createBufferSource();
+    s.buffer = window.__SAMPLES[name];
+    s.playbackRate.value = rate == null ? 1 : rate;
+    const g = gainNode(ctx, amp == null ? 0.9 : amp);
+    s.connect(g);
+    if (lp) { const f = bq(ctx, 'lowpass', lp, 0.7); g.connect(f); f.connect(bus); f.connect(rev); }
+    else { g.connect(bus); g.connect(rev); }
+    s.start(t);
+  };
+}
+function hitSynth(fn, p, amp) {
+  return function (ctx, t, bus, rev) {
+    const out = fn(ctx, t, bus, Object.assign({}, p, { amp: amp == null ? (p.amp == null ? 0.9 : p.amp) : amp }));
+    out.connect(rev);
+  };
+}
+
+/* ============================================================
+   Cases
+   ============================================================ */
+
+const CASES = {
+  'groove-sample': function () { return renderGroove('sample', 4, true); },
+  'groove-synth': function () { return renderGroove('synth', 4, true, false); },
+  'groove-synth-dark': function () { return renderGroove('synth', 4, true, true); },
+
+  'snare-ab': function () {
+    const hits = [];
+    for (let i = 0; i < 4; i++) {
+      hits.push(hitSample('snare', 1, 8000, 0.9));
+      hits.push(hitSynth(snareSynth, KIT_SYNTH.snare, 0.95));
+    }
+    return renderHits(hits);
+  },
+
+  'snare-variants': function () {
+    return renderHits([
+      hitSample('snare', 1, 8000, 0.9),
+      hitSample('snare', 0.78, 4800, 1.05),
+      hitSynth(snareSynth, { body: 190, bodyAmt: 0,
+        layers: [{ bp: 2100, q: 0.55, amt: 0.5, decay: 0.2, hp: 600 }],
+        attack: 0.004, lp: 5200, drive: 1.4, pink: true }, 2.4),
+      hitSynth(snareSynth, KIT_SYNTH.snare, 0.95),
+      hitSynth(snareSynth, Object.assign({}, KIT_SYNTH.snare, { bits: 12, drive: 2.6 }), 0.95),
+      hitSynth(snareSynth, Object.assign({}, KIT_SYNTH.snare, {
+        body: 165, attack: 0.008, toneDecay: 0.22, lp: 5000,
+        layers: [
+          { bp: 850,  q: 1.0, amt: 0.15, decay: 0.26, hp: 300 },
+          { bp: 2400, q: 0.65, amt: 0.17, decay: 0.24, hp: 850 },
+          { bp: 6800, q: 0.6, amt: 0.04, decay: 0.09, hp: 4000 },
+        ],
+      }), 0.95),
+    ]);
+  },
+
+  'kick-ab': function () {
+    return renderHits([
+      hitSample('kick', 1, 8000, 1.0),
+      hitSample('kick', 0.82, 3500, 1.1),
+      hitSynth(kickSynth, KIT_SYNTH.kick, 0.95),
+      hitSynth(kickSynth, Object.assign({}, KIT_SYNTH.kick, { f0: 96, decay: 0.34, click: 0.05 }), 0.95),
+    ]);
+  },
+
+  'hat-ab': function () {
+    return renderHits([
+      hitSample('hihat', 1, 13000, 0.55),
+      hitSynth(hatSynth, KIT_SYNTH.hat, null),
+      hitSynth(hatSynth, Object.assign({}, KIT_SYNTH.hat, { metal: true, amp: 1.7 }), null),
+      hitSynth(hatSynth, Object.assign({}, KIT_SYNTH.hat, { layers: [{ bp: 6800, q: 0.7, amt: 0.9, decay: 0.045 }, { bp: 5600, q: 0.9, amt: 0.18, decay: 0.18 }] }), null),
+    ]);
+  },
+};
+
+/* ---------- 载入采样 ---------- */
+window.__SAMPLES = null;
+async function loadSamples() {
+  if (window.__SAMPLES) return window.__SAMPLES;
+  const ctx = new OfflineAudioContext({ numberOfChannels: 2, length: 1, sampleRate: SR });
+  async function get(n) {
+    const r = await fetch(SAMPLE_BASE + KIT_SAMPLE + '/' + n + '.mp3');
+    return ctx.decodeAudioData(await r.arrayBuffer());
+  }
+  window.__SAMPLES = {
+    kick: await get('kick'),
+    snare: await get('snare'),
+    hihat: await get('hihat'),
+    tom1: await get('tom1'),
+  };
+  return window.__SAMPLES;
+}
+
+/* ---------- WAV 编码 ---------- */
+function wavBase64(buf) {
+  const ch = buf.numberOfChannels, n = buf.length, sr = buf.sampleRate;
+  const bytes = 44 + n * ch * 2;
+  const ab = new ArrayBuffer(bytes);
+  const dv = new DataView(ab);
+  function str(o, s) { for (let i = 0; i < s.length; i++) dv.setUint8(o + i, s.charCodeAt(i)); }
+  str(0, 'RIFF'); dv.setUint32(4, bytes - 8, true); str(8, 'WAVE');
+  str(12, 'fmt '); dv.setUint32(16, 16, true); dv.setUint16(20, 1, true);
+  dv.setUint16(22, ch, true); dv.setUint32(24, sr, true);
+  dv.setUint32(28, sr * ch * 2, true); dv.setUint16(32, ch * 2, true);
+  dv.setUint16(34, 16, true); str(36, 'data'); dv.setUint32(40, n * ch * 2, true);
+  const chans = [];
+  for (let c = 0; c < ch; c++) chans.push(buf.getChannelData(c));
+  let off = 44;
+  for (let i = 0; i < n; i++) {
+    for (let c = 0; c < ch; c++) {
+      let s = chans[c][i];
+      if (s > 1) s = 1; else if (s < -1) s = -1;
+      dv.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+      off += 2;
+    }
+  }
+  const u8 = new Uint8Array(ab);
+  let out = '';
+  const CH = 0x8000;
+  for (let i = 0; i < u8.length; i += CH) {
+    out += String.fromCharCode.apply(null, u8.subarray(i, i + CH));
+  }
+  return btoa(out);
+}
+
+window.renderCase = async function (name) {
+  await loadSamples();
+  const t0 = performance.now();
+  const buf = await CASES[name]();
+  const b64 = wavBase64(buf);
+  return { name: name, ms: Math.round(performance.now() - t0), dur: buf.duration, b64: b64 };
+};
+
+window.__ready = true;
+</script>

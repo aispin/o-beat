@@ -29,7 +29,8 @@
 └─ docs/
    ├─ prd.md
    ├─ tech.md
-   └─ adr/              架构决策记录
+   ├─ adr/              架构决策记录
+   └─ research/         调研：lofi 鼓组合成可行性 + 实验台（lofi-lab/）
 ```
 
 ## 开发
