@@ -7,19 +7,21 @@
 
    旋律写成字符串，一小节一行，16 格（3/4 是 12 格），`.` 是留白。
    用绝对 MIDI 而不是音级：能直接看出走向，也方便对着和弦校对。 */
-import type { BassSpec, CompSpec, DrumSpec, MixSpec, VoiceName } from './types';
+import type { BassSpec, CompSpec, DrumSpec, MixSpec, PadSpec, VoiceName } from './types';
 
 export interface Composition {
   inst: VoiceName;
   lead: (number | null)[][];
   comp: CompSpec;
+  /** 铺底垫：8 小节一片的空气，见 arrange.ts 的 schedulePad */
+  pad?: PadSpec;
   bass: BassSpec;
   drums: DrumSpec;
   mix: MixSpec;
   /** 主旋律回声量（synthwave 的 ping-pong delay） */
   echo?: number;
-  /** 黑胶底噪量 */
-  vinyl?: number;
+  /** 磁带底噪量（嘶声 + 噼啪） */
+  tape?: number;
   swing?: number;
 }
 
@@ -107,9 +109,10 @@ export const COMPOSE: Record<string, Composition> = {
   },
 
   /* 长呼吸 · lofi
-     电钢长音、大量留白、半音符低音、黑胶底噪。慢才是重点。 */
+     软钢琴唱旋律、梦幻垫铺底、连奏软贝斯、合成鼓、磁带底噪。
+     慢、空、闷、糯、脏、松，六样齐。 */
   breath: {
-    inst: 'epiano',
+    inst: 'softPiano',
     lead: seq([
       '72 . . . . . 76 . 79 . . . . . . .',
       '. . . . 72 . . . . . . . . . . .',
@@ -120,18 +123,37 @@ export const COMPOSE: Record<string, Composition> = {
       '74 . . . . . 71 . 74 . . . . . . .',
       '. . . . 79 . . . . . . . . . . .',
     ]),
-    comp: { type: 'arp8', inst: 'nylon', oct: 12, gain: 0.26 },
-    bass: { type: 'half', inst: 'ebass', gain: 0.52 },
+    comp: { type: 'arp8', inst: 'nylon', oct: 12, gain: 0.22 },
+    pad: { gain: 0.042, rev: 0.55 },
+    /* 低音线：每两小节「根音 → 一个把耳朵带去下一个和弦的音」。
+       G 落在 Am 上是七音、落在 F 上是九音，都是"能往前走的音"，
+       不是"把和弦弹一遍"。时值由 arrange.ts 按到下一个音的距离算成连奏。 */
+    bass: {
+      type: 'line',
+      inst: 'bassLofi',
+      gain: 0.42,
+      line: seq([
+        '45 . . . . . . . . . . . . . . .',
+        '. . . . . . . . 43 . . . . . . .',
+        '41 . . . . . . . . . . . . . . .',
+        '. . . . . . . . 45 . . . . . . .',
+        '36 . . . . . 43 . . . . . . . . .',
+        '. . . . . . . . . . . . 38 . . .',
+        '43 . . . . . . . . . . . . . . .',
+        '. . . . . . . . 40 . . . . . . .',
+      ]),
+    },
     drums: { kit: 'lofi', kick: [0, 10], snare: [4, 12], hat: 'off', open: [] },
-    mix: { cut: 3200, lead: 0.44, comp: 0.26, bass: 0.52, vol: 1.5 },
-    vinyl: 0.05,
+    mix: { cut: 3200, lead: 0.46, comp: 0.24, bass: 0.52, vol: 1.0 },
+    tape: 0.13,
     swing: 0.012,
   },
 
-  /* 雨窗午后 · 指弹民谣
-     尼龙弦分解 + 长笛旋律。低音用尼龙弦自己挑，不用贝斯。 */
+  /* 雨窗午后 · 指弹民谣（归在 lofi 场景）
+     软钢琴唱五声旋律、尼龙弦指弹、软贝斯托底、没有踩镲。
+     cut 开到 8000：指弹的指甲颗粒要留着，只砍掉空气。 */
   rain: {
-    inst: 'flute',
+    inst: 'softPiano',
     lead: seq([
       '74 . 76 . 78 . . . 81 . . . 78 . . .',
       '. . 76 . 74 . . . . . . . . . . .',
@@ -142,10 +164,28 @@ export const COMPOSE: Record<string, Composition> = {
       '78 . . . 81 . . . 86 . . . 81 . . .',
       '. . . . 78 . . . . . . . . . . .',
     ]),
-    comp: { type: 'pick', inst: 'nylon', oct: 12, gain: 0.34 },
-    bass: { type: 'root5', inst: 'nylon', gain: 0.46, oct: 0 },
+    comp: { type: 'pick', inst: 'nylon', oct: 12, gain: 0.30 },
+    pad: { gain: 0.036, rev: 0.5 },
+    /* 每两小节「根音 → 三音」，而每个三音都是一个半音级进到下一个根音：
+       F#→G、B→A、C#→D。这就是"贝斯和旋律有和声关系"最省力的做法。 */
+    bass: {
+      type: 'line',
+      inst: 'bassLofi',
+      gain: 0.38,
+      line: seq([
+        '38 . . . . . . . . . . . . . . .',
+        '. . . . . . . . 42 . . . . . . .',
+        '43 . . . . . . . . . . . . . . .',
+        '. . . . . . . . 47 . . . . . . .',
+        '45 . . . . . . . . . . . . . . .',
+        '. . . . . . . . 49 . . . . . . .',
+        '38 . . . . . . . . . . . . . . .',
+        '. . . . . . . . 42 . . . . . . .',
+      ]),
+    },
     drums: { kit: 'lofi', kick: [0, 8], snare: [4, 12], hat: 'none', open: [] },
-    mix: { cut: 8000, lead: 0.40, comp: 0.34, bass: 0.46, vol: 1.2 },
+    mix: { cut: 8000, lead: 0.40, comp: 0.28, bass: 0.40, vol: 1.0 },
+    tape: 0.10,
   },
 
   /* 地下现场 · 摇滚
@@ -185,6 +225,6 @@ export const FALLBACK_VOICE: Record<string, { inst: VoiceName; bass: VoiceName; 
   pixel: { inst: 'chipLead', bass: 'chipBass', cut: 8200, kit: 'chip' },
   cyber: { inst: 'pluck', bass: 'sub', cut: 7600, kit: 'kpr77' },
   classic: { inst: 'piano', bass: 'cello', cut: 11000, kit: 'acoustic' },
-  lofi: { inst: 'epiano', bass: 'ebass', cut: 3200, kit: 'lofi' },
+  lofi: { inst: 'softPiano', bass: 'bassLofi', cut: 3200, kit: 'lofi' },
   rock: { inst: 'egt', bass: 'ebass', cut: 5200, kit: 'acoustic' },
 };

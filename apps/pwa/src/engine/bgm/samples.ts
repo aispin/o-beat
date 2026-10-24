@@ -16,8 +16,8 @@ export const SAMPLES: Record<string, { dir: string; notes: string[] }> = {
   flute: { dir: 'inst/flute', notes: ['C4', 'E4', 'A4', 'C5', 'E5', 'A5', 'C6'] },
 };
 
-/** 音色名 → 实际采样集。电钢是"钢琴采样压掉高频"，不是另一套文件。 */
-export const SAMPLE_ALIAS: Record<string, string> = { epiano: 'piano' };
+/** 音色名 → 实际采样集。电钢与软钢琴都是"钢琴采样 + 不同的处理"，不是另存一套文件。 */
+export const SAMPLE_ALIAS: Record<string, string> = { epiano: 'piano', softPiano: 'piano' };
 
 /** 有采样鼓的套鼓。chip 是合成的，不在这里。 */
 export const KITS = ['acoustic', 'techno', 'kpr77'];

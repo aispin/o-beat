@@ -124,6 +124,7 @@ export function buildScore(song?: SongLike): Score {
     comp: hand
       ? hand.comp
       : { type: meter === 3 ? 'waltz' : 'arp8', inst: fb.inst, oct: 12, gain: 0.24 },
+    pad: hand ? hand.pad : undefined,
     bass: hand ? hand.bass : { type: meter === 3 ? 'waltz' : 'eighth', inst: fb.bass, gain: 0.55 },
     drums: hand
       ? hand.drums
@@ -138,7 +139,7 @@ export function buildScore(song?: SongLike): Score {
       ? hand.mix
       : { cut: fb.cut, lead: 0.34, comp: 0.24, bass: 0.55, vol: 1 },
     echo: hand && hand.echo ? hand.echo : 0,
-    vinyl: hand && hand.vinyl ? hand.vinyl : 0,
+    tape: hand && hand.tape ? hand.tape : 0,
     swing: hand && hand.swing ? hand.swing : 0,
     // 曲目系统（backing.js）按这几个字段排伴奏与谱面
     bassOct: meter === 3 ? [0, 0, 7, 0, 7, 12] : BASS_OCT,

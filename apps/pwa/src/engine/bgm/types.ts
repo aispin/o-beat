@@ -1,11 +1,16 @@
 /* bgm 模块共用的类型。
    放在最底层，别的文件只 import 这里，不反向依赖。 */
 
-/** 音色名。前八个是采样乐器，中间四个是合成，最后两个是芯片音（只给像素心跳用）。 */
+/** 音色名。
+    - 采样乐器：piano / epiano / softPiano / ebass / egt / nylon / violin / cello / flute
+    - 合成：bell / pluck / saw / pad / bassLofi / sub
+    - 芯片音（只给像素心跳用）：chipLead / chipBass */
 export type VoiceName =
   | 'piano'
   | 'epiano'
+  | 'softPiano'
   | 'ebass'
+  | 'bassLofi'
   | 'egt'
   | 'nylon'
   | 'violin'
@@ -14,6 +19,7 @@ export type VoiceName =
   | 'bell'
   | 'pluck'
   | 'saw'
+  | 'pad'
   | 'sub'
   | 'chipLead'
   | 'chipBass';
@@ -37,14 +43,29 @@ export interface CompSpec {
   pat?: number[];
 }
 
-/** 低音层的节奏型 */
-export type BassType = 'quarter' | 'eighth' | 'waltz' | 'half' | 'root5' | 'riff';
+/** 低音层的节奏型。`line` 表示"手写旋律线"，看 BassSpec.line，不看节奏型表。 */
+export type BassType = 'quarter' | 'eighth' | 'waltz' | 'half' | 'root5' | 'riff' | 'line';
 
 export interface BassSpec {
   type: BassType;
   inst: VoiceName;
   gain: number;
   oct?: number;
+  /** 手写低音线：bars × steps，绝对 MIDI，null 是休止。
+      有它就忽略 type —— 音符时值按"到下一个音的距离"算成连奏，不是每音一顿。 */
+  line?: (number | null)[][];
+}
+
+/** 铺底垫：慢起音、宽声场、靠混响放到后面。
+    和 CompSpec 是两回事 —— comp 是"和弦怎么弹"，pad 是"房间里的空气"。 */
+export interface PadSpec {
+  gain: number;
+  /** 和弦音的八度偏移 */
+  oct?: number;
+  /** 铺几个和弦音：3 = 三和弦原位，4（缺省）= 再加一个高八度根音 */
+  voices?: number;
+  /** 混响送出量 0..1 */
+  rev?: number;
 }
 
 export type HatType = 'eighth' | '16' | 'off' | 'none';
@@ -84,13 +105,15 @@ export interface Score {
   lead: (number | null)[][];
   inst: VoiceName;
   comp: CompSpec;
+  /** 铺底垫。没有这一层（电子、摇滚）就不写 */
+  pad?: PadSpec;
   bass: BassSpec;
   drums: DrumSpec;
   mix: MixSpec;
   /** 主旋律回声量 */
   echo: number;
-  /** 黑胶底噪量 */
-  vinyl: number;
+  /** 磁带底噪量（嘶声 + 噼啪） */
+  tape: number;
   /** 奇数十六分位推后的秒数。0 = 正拍；lofi 用 0.012 */
   swing: number;
   /** 给曲目系统（backing.js）排伴奏用 */
@@ -119,7 +142,10 @@ export interface Bus {
   noise: AudioBuffer;
   /** 采样缓存：'piano:C4' → AudioBuffer */
   bufs: Record<string, AudioBuffer>;
-  vinyl: GainNode | null;
+  /** 磁带底噪的音量闸门；null 表示这台设备做不出底噪 */
+  tape: GainNode | null;
+  /** 混响送出。voice 的 rev 量接到这里 */
+  rev: GainNode | null;
 }
 
 /** 采样播放的可选项 */
@@ -132,4 +158,6 @@ export interface PlayOpt {
   detune?: number;
   /** 起音时长 */
   attack?: number;
+  /** 混响送出量 0..1 */
+  rev?: number;
 }

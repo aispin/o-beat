@@ -21,7 +21,45 @@ const BASS_PATTERN: Record<string, [number, number][]> = {
   riff: [[0, 0], [2, 0], [4, 0], [6, 0], [8, 0], [10, 0], [12, 0], [14, 0]],
 };
 
-export function scheduleBass(bus: Bus, sc: Score, chord: Chord, t: number, sw = 0): void {
+/** 手写低音线里，从 (bar, s) 往后数多少格才撞到下一个音。
+    这个距离就是时值 —— 连奏的来源。找不到就按两拍算。 */
+function bassGap(sc: Score, bar: number, s: number): number {
+  const line = sc.bass.line;
+  if (!line) return 8;
+  const total = sc.bars * sc.steps;
+  const start = bar * sc.steps + s;
+  for (let k = 1; k <= total; k++) {
+    const gi = (start + k) % total;
+    const row = line[Math.floor(gi / sc.steps)];
+    if (row && row[gi % sc.steps] != null) return k;
+  }
+  return 8;
+}
+
+/** 手写低音线：一小节一行、绝对 MIDI。
+    时值不写死，从"到下一个音的距离"算出来 —— 音符之间没有固定的空档，
+    所以不会一顿一顿。最后一个音会绕回曲首，循环接缝同样是连着的。 */
+function scheduleBassLine(bus: Bus, sc: Score, t: number, bar: number, sw: number): void {
+  const b = sc.bass;
+  const row = b.line && b.line[bar];
+  if (!row) return;
+  const g = b.gain * sc.mix.bass;
+  const oct = b.oct || 0;
+
+  row.forEach((m, s) => {
+    if (m == null) return;
+    // 0.97 而不是 1：留 3% 的缝，否则同一音高连着两个音会粘成一条
+    const dur = Math.max(2, bassGap(sc, bar, s) * 0.97) * sc.step;
+    const at = t + s * sc.step + (s % 2 ? sw : 0);
+    voice(bus, b.inst, m + oct, at, dur, g, 0, { lp: 3000, rev: 0.04 });
+  });
+}
+
+export function scheduleBass(bus: Bus, sc: Score, chord: Chord, t: number, bar: number, sw = 0): void {
+  if (sc.bass.line) {
+    scheduleBassLine(bus, sc, t, bar, sw);
+    return;
+  }
   const b = sc.bass;
   const pat = BASS_PATTERN[b.type] || BASS_PATTERN.quarter;
   // sub 是持续低频，给得比拨弦长；waltz 本来就是一小节一个长音
@@ -34,6 +72,31 @@ export function scheduleBass(bus: Bus, sc: Score, chord: Chord, t: number, sw = 
     const at = t + s * sc.step + (s % 2 ? sw : 0);
     if (b.inst === 'sub') voice(bus, 'sub', midi, at, len, g, 0);
     else voice(bus, b.inst, midi, at, len, g, 0, { lp: 3000 });
+  });
+}
+
+/** 铺底垫：整首 8 小节一片，只在**换和弦的那一小节**起音，
+    一直铺到下一个和弦换进来为止。和 comp 的区别：
+    comp 是"和弦怎么弹"（有节奏、有格位），pad 是"房间里的空气"（没有格位）。 */
+export function schedulePad(bus: Bus, sc: Score, chord: Chord, t: number, bar: number): void {
+  const p = sc.pad;
+  if (!p) return;
+  const prog = sc.prog;
+  if (bar > 0 && prog[bar] === prog[bar - 1]) return;
+
+  // 这个和弦要铺几小节
+  let n = 1;
+  while (bar + n < prog.length && prog[bar + n] === prog[bar]) n++;
+  // 尾巴多给 4 格，让两个和弦叠在一起换 —— 有一条"接缝就没有空气"
+  const dur = sc.step * sc.steps * n + sc.step * 4;
+  const oct = p.oct || 0;
+  const tones = chord.tones.map((x) => x + oct);
+  const notes = p.voices === 3 ? [tones[0], tones[1], tones[2]] : [tones[0], tones[1], tones[2], tones[0] + 12];
+  // 低→高、左→右：垫的四个音各自站一个位置，宽度靠"分布"而不是把整体推远
+  const spots = [-0.18, 0.02, 0.2, 0.1];
+
+  notes.forEach((m, i) => {
+    voice(bus, 'pad', m, t, dur, p.gain, spots[i % spots.length], { rev: p.rev == null ? 0.5 : p.rev });
   });
 }
 
@@ -171,7 +234,8 @@ export function scheduleStep(bus: Bus, sc: Score, i: number, t: number): void {
   /* 小节开头把和声、低音、鼓一次排完。
      注意不能 return —— 第 0 格上通常也有旋律。 */
   if (s === 0) {
-    scheduleBass(bus, sc, chord, t, sc.swing);
+    scheduleBass(bus, sc, chord, t, bar, sc.swing);
+    schedulePad(bus, sc, chord, t, bar);
     scheduleComp(bus, sc, chord, t, sc.swing);
     scheduleDrums(bus, sc, t, bar, sc.swing);
   }

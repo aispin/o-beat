@@ -4,6 +4,8 @@ import type { Bus, Score, SongLike } from './types';
 import { FALLBACK_SONG, scoreOf } from './score';
 import { ensureSamples, needSamples } from './samples';
 import { scheduleStep } from './arrange';
+import { tapeLoop } from '../tape';
+import { roomIR } from '../space';
 
 /** 提前排期的秒数 */
 const LOOKAHEAD = 0.15;
@@ -41,28 +43,61 @@ function createBus(): Bus | null {
   master.connect(lp);
   lp.connect(ctx.destination);
 
-  // 白噪声：鼓的瞬态和黑胶底噪都从这条 buffer 里切
+  // 白噪声：鼓的瞬态和底噪都从这条 buffer 里切
   const len = Math.floor(ctx.sampleRate * 0.6);
   const noise = ctx.createBuffer(1, len, ctx.sampleRate);
   const data = noise.getChannelData(0);
   for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
 
-  // 黑胶底噪：常驻循环，增益为 0 时等于不存在
-  const vs = ctx.createBufferSource();
-  vs.buffer = noise;
-  vs.loop = true;
-  const vf = ctx.createBiquadFilter();
-  vf.type = 'bandpass';
-  vf.frequency.value = 2600;
-  vf.Q.value = 0.5;
-  const vinyl = ctx.createGain();
-  vinyl.gain.value = 0;
-  vs.connect(vf);
-  vf.connect(vinyl);
-  vinyl.connect(master);
-  vs.start();
+  /* 混响：算一条"小房间"的 IR。湿声回 master，
+     所以它跟干声一起过总低通 —— lofi 的混响尾巴也是闷的，这是对的。 */
+  const rev = ctx.createGain();
+  {
+    const pre = ctx.createDelay(0.12);
+    pre.delayTime.value = 0.016;
+    const conv = ctx.createConvolver();
+    conv.buffer = roomIR(ctx, { dur: 1.9, decay: 2.7, bright: 0.72, pre: 0.016 });
+    const damp = ctx.createBiquadFilter();
+    damp.type = 'lowpass';
+    damp.frequency.value = 4200;
+    const wet = ctx.createGain();
+    wet.gain.value = 0.85;
+    rev.connect(pre);
+    pre.connect(conv);
+    conv.connect(damp);
+    damp.connect(wet);
+    wet.connect(master);
+  }
 
-  return { ctx, master, lp, noise, bufs: {}, vinyl };
+  /* 磁带底噪：嘶声 + 噼啪。离线渲染成 9.7 秒的循环，
+     运行时只有一个 BufferSource —— 噼啪的重心在毫秒以下，逐颗调度会漏。 */
+  const tapeSrc = ctx.createBufferSource();
+  tapeSrc.buffer = tapeLoop(ctx);
+  tapeSrc.loop = true;
+  const tapeTone = ctx.createBiquadFilter();
+  tapeTone.type = 'lowpass';
+  tapeTone.frequency.value = 7200;
+  const tapeAmp = ctx.createGain();
+  tapeAmp.gain.value = 1;
+  const tape = ctx.createGain();
+  tape.gain.value = 0;
+  tapeSrc.connect(tapeTone);
+  tapeTone.connect(tapeAmp);
+  tapeAmp.connect(tape);
+  tape.connect(master);
+  // 极慢的音量起伏（0.043 Hz ≈ 23 秒一轮）：转起来的磁带不是恒定的
+  const wob = ctx.createOscillator();
+  wob.type = 'sine';
+  wob.frequency.value = 0.043;
+  const wobAmt = ctx.createGain();
+  wobAmt.gain.value = 0.16;
+  wob.connect(wobAmt);
+  wobAmt.connect(tapeAmp.gain);
+  // 从随机位置进循环：每次页面加载的噼啪排布都不一样
+  tapeSrc.start(0, Math.random() * 1.6);
+  wob.start();
+
+  return { ctx, master, lp, noise, bufs: {}, tape, rev };
 }
 
 export function createBgm(): BgmApi {
@@ -160,10 +195,10 @@ export function createBgm(): BgmApi {
     bus.lp.frequency.setValueAtTime(bus.lp.frequency.value, now);
     bus.lp.frequency.linearRampToValueAtTime(sc.mix.cut, now + 0.4);
 
-    if (bus.vinyl) {
-      bus.vinyl.gain.cancelScheduledValues(now);
-      bus.vinyl.gain.setValueAtTime(bus.vinyl.gain.value, now);
-      bus.vinyl.gain.linearRampToValueAtTime(sc.vinyl, now + 0.6);
+    if (bus.tape) {
+      bus.tape.gain.cancelScheduledValues(now);
+      bus.tape.gain.setValueAtTime(bus.tape.gain.value, now);
+      bus.tape.gain.linearRampToValueAtTime(sc.tape, now + 0.6);
     }
 
     bus.master.gain.cancelScheduledValues(now);
@@ -189,7 +224,7 @@ export function createBgm(): BgmApi {
     bus.master.gain.cancelScheduledValues(now);
     bus.master.gain.setValueAtTime(bus.master.gain.value, now);
     bus.master.gain.linearRampToValueAtTime(0, now + f);
-    if (bus.vinyl) bus.vinyl.gain.setTargetAtTime(0, now, f / 3);
+    if (bus.tape) bus.tape.gain.setTargetAtTime(0, now, f / 3);
   }
 
   function go(): void {

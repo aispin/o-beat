@@ -5,16 +5,23 @@ import { pickSample } from './samples';
 
 export const mtof = (m: number): number => 440 * Math.pow(2, (m - 69) / 12);
 
-/** 接到总线，顺便做声像 */
-export function out(bus: Bus, node: AudioNode, pan?: number): void {
+/** 接到总线，顺便做声像与混响送出。
+    rev 是"送出量"不是"湿度"：干声永远按原样进 master，额外复制一份给混响。 */
+export function out(bus: Bus, node: AudioNode, pan?: number, rev?: number): void {
+  let tail: AudioNode = node;
   if (pan && bus.ctx.createStereoPanner) {
     const p = bus.ctx.createStereoPanner();
     p.pan.value = pan;
-    node.connect(p);
-    p.connect(bus.master);
-    return;
+    tail.connect(p);
+    tail = p;
   }
-  node.connect(bus.master);
+  tail.connect(bus.master);
+  if (rev && rev > 0 && bus.rev) {
+    const g = bus.ctx.createGain();
+    g.gain.value = rev;
+    tail.connect(g);
+    g.connect(bus.rev);
+  }
 }
 
 /* 失真曲线：软削波。硬方波会立刻回到 8bit 味，tanh 才是过载的感觉。 */
@@ -83,7 +90,7 @@ export function playSample(
   g.gain.setValueAtTime(gain, t + hold);
   g.gain.exponentialRampToValueAtTime(0.0001, t + Math.max(hold + 0.01, dur));
   tail.connect(g);
-  out(bus, g, pan);
+  out(bus, g, pan, o.rev);
 
   src.start(t);
   // 采样比 dur 短时提前收尾，避免读到 buffer 之外的空洞
@@ -251,6 +258,155 @@ function subBass(bus: Bus, freq: number, t: number, dur: number, gain: number): 
   o2.stop(t + dur + 0.02);
 }
 
+/** 软贝斯：lofi 的低音。
+    ------------------------------------------------------------
+    和 `ebass`（采样电贝斯）的区别不在音高，在**起音与收尾**：
+    采样贝斯是 2 ms 的拨弦瞬态 + 很快的衰减，密集排布就是"一顿一顿"。
+    这里要的是"手指按下去、弦自己慢慢松"：
+
+    - 14 ms 起音（比采样慢一个数量级），没有拨片的"啪"；
+    - 低通从 1250 Hz 收到 620 Hz：起头有一点指肉的亮，之后只剩厚度；
+    - 包络三段（100% → 66% → 34%），不是"响一下然后断"；
+    - 一点点 tanh 饱和，模拟磁带/音箱的软压缩。
+    音高不抖 —— 低频抖起来是"跑调"，不是"复古"。 */
+function bassLofi(
+  bus: Bus,
+  freq: number,
+  t: number,
+  dur: number,
+  gain: number,
+  pan?: number,
+  rev?: number,
+): void {
+  const c = bus.ctx;
+  const lp = c.createBiquadFilter();
+  lp.type = 'lowpass';
+  lp.Q.value = 1.1;
+  lp.frequency.setValueAtTime(1250, t);
+  lp.frequency.exponentialRampToValueAtTime(620, t + 0.22);
+
+  const sh = c.createWaveShaper();
+  sh.curve = driveCurve(0.05);
+  sh.oversample = '2x';
+
+  const g = c.createGain();
+  const a = 0.014;
+  const d1 = t + 0.30;
+  const d2 = Math.max(d1 + 0.06, t + dur * 0.86);
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(Math.max(0.0002, gain), t + a);
+  g.gain.exponentialRampToValueAtTime(Math.max(0.0002, gain * 0.66), d1);
+  g.gain.exponentialRampToValueAtTime(Math.max(0.0002, gain * 0.34), d2);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur + 0.06);
+
+  lp.connect(sh);
+  sh.connect(g);
+  out(bus, g, pan, rev);
+
+  // 正弦是"听见的音高"，三角是"手指的触感"，二次谐波给一点定位感
+  const spec: [OscillatorType, number, number][] = [
+    ['sine', 1, 1],
+    ['triangle', 1, 0.28],
+    ['sine', 2, 0.09],
+  ];
+  spec.forEach(([type, mul, amt]) => {
+    const o = c.createOscillator();
+    o.type = type;
+    // 起音时高 1.2%，45 ms 落回：弦被按下去的那一下
+    o.frequency.setValueAtTime(freq * mul * 1.012, t);
+    o.frequency.exponentialRampToValueAtTime(freq * mul, t + 0.045);
+    const og = c.createGain();
+    og.gain.value = amt;
+    o.connect(og);
+    og.connect(lp);
+    o.start(t);
+    o.stop(t + dur + 0.08);
+  });
+}
+
+/** 梦幻铺底：一支 pad 就是"一片空气"，不是一个和弦。
+    ------------------------------------------------------------
+    四个决定叠出"梦幻"：
+
+    1. **失谐**。同一音高叠 3 支三角波，分别 −9 / +4 / +11 音分。
+       它们之间的拍频是 0.2–0.8 Hz —— 比颤音慢得多，人耳听不出"在抖"，
+       只听到"在动"。合唱效果的本质就是这个。
+    2. **慢开慢收**。起音 0.5–1.1 s，收尾 0.7–2.2 s，和弦之间互相搭住，
+       永远没有一个"从零开始"的瞬间。
+    3. **只往上开的低通**。820 → 2100 Hz，跟起音同步。
+       垫的亮度如果在尾巴上回落，就会变成"呼——"的呼吸声，太像风。
+    4. **高八度微光**。一支很轻的正弦（0.15）叠在上面，偏左或偏右，
+       和主体错开 —— 梦幻感大半来自这条"听不清但一直在"的泛音。
+    */
+function softPad(
+  bus: Bus,
+  freq: number,
+  t: number,
+  dur: number,
+  gain: number,
+  pan?: number,
+  rev?: number,
+): void {
+  const c = bus.ctx;
+  const base = pan || 0;
+
+  const lp = c.createBiquadFilter();
+  lp.type = 'lowpass';
+  lp.Q.value = 0.4;
+  lp.frequency.setValueAtTime(820, t);
+  lp.frequency.linearRampToValueAtTime(2100, t + Math.min(2.6, Math.max(0.6, dur * 0.75)));
+
+  const amp = c.createGain();
+  const atk = Math.min(1.1, Math.max(0.5, dur * 0.22));
+  const rel = Math.min(2.2, Math.max(0.7, dur * 0.35));
+  const hold = Math.max(atk + 0.05, dur - rel);
+  amp.gain.setValueAtTime(0.0001, t);
+  amp.gain.linearRampToValueAtTime(Math.max(0.0002, gain), t + atk);
+  amp.gain.setValueAtTime(Math.max(0.0002, gain), t + hold);
+  amp.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  lp.connect(amp);
+  out(bus, amp, 0, rev);
+
+  // 全体音高一起极慢地漂 ±7 音分：磁带转速不稳，但比手抖还慢
+  const lfo = c.createOscillator();
+  lfo.type = 'sine';
+  lfo.frequency.value = 0.19 + Math.random() * 0.08;
+  const lg = c.createGain();
+  lg.gain.value = 7;
+  lfo.connect(lg);
+  lfo.start(t);
+  lfo.stop(t + dur + 0.1);
+
+  const spec: [number, number, number, OscillatorType, number][] = [
+    // 八度倍率, 音分, 声像, 波形, 相对音量
+    [1, -9, -0.62, 'triangle', 1],
+    [1, 4, 0.02, 'triangle', 0.86],
+    [1, 11, 0.62, 'sawtooth', 0.34],
+    [2, 3, 0.34, 'sine', 0.15],
+  ];
+  spec.forEach(([mul, cents, p, type, amt]) => {
+    const o = c.createOscillator();
+    o.type = type;
+    o.frequency.value = freq * mul;
+    o.detune.value = cents;
+    lg.connect(o.detune);
+
+    const og = c.createGain();
+    og.gain.value = amt;
+    o.connect(og);
+    if (c.createStereoPanner) {
+      const pn = c.createStereoPanner();
+      pn.pan.value = Math.max(-1, Math.min(1, base + p));
+      og.connect(pn);
+      pn.connect(lp);
+    } else {
+      og.connect(lp);
+    }
+    o.start(t);
+    o.stop(t + dur + 0.12);
+  });
+}
+
 /** 噪声瞬态：军鼓的沙沙、踩镲的嗒、黑胶的噼啪都从这来 */
 export function noiseHit(
   bus: Bus,
@@ -306,9 +462,35 @@ export function voice(
     case 'saw':
       supersaw(bus, mtof(midi), t, dur, gain, pan);
       return;
+    case 'pad':
+      softPad(bus, mtof(midi), t, dur, gain, pan, opt && opt.rev);
+      return;
+    case 'bassLofi':
+      bassLofi(bus, mtof(midi), t, dur, gain, pan, opt && opt.rev);
+      return;
     case 'sub':
       subBass(bus, mtof(midi), t, dur, gain);
       return;
+    case 'softPiano': {
+      /* 软钢琴 = 钢琴采样 + 三道处理，每一道都是为了"去掉琴键的锋利"：
+         1. 低通 2100 Hz：钢琴的槌击噪声在 3–6 kHz，砍掉才是"软"。
+         2. 14 ms 起音：真钢琴是 5 ms，但 lofi 要"闷进去"，不是"弹出来"。
+         3. 7 音分失谐的第二层（弱 34%、晚 14 ms）：拍频 = 磁带走带不稳。
+         最后一点点饱和，让录音机的磁头过载感出来。 */
+      const lp = (opt && opt.lp) || 2600;
+      const rev = opt && opt.rev != null ? opt.rev : 0.14;
+      if (playSample(bus, 'piano', midi, t, dur, gain, pan, { lp, attack: 0.014, drive: 0.05, rev })) {
+        playSample(bus, 'piano', midi, t + 0.014, dur, gain * 0.34, pan, {
+          lp: lp * 0.82,
+          detune: 0.0042,
+          attack: 0.02,
+          rev,
+        });
+        return;
+      }
+      tone(bus, 'triangle', mtof(midi), t, dur, gain * 0.8, pan);
+      return;
+    }
     case 'epiano': {
       // 电钢 = 钢琴采样压掉高频 + 一层微失谐叠层。
       // 直接放钢琴太"亮"，电子和 lofi 需要更钝的琴。

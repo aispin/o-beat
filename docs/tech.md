@@ -1,7 +1,7 @@
 # O My Beat · 技术文档
 
 > 面向接手代码的人。产品规则看 [`prd.md`](prd.md)，本文只讲**怎么实现、为什么这么实现、改东西该动哪里**。
-> 最后更新：2026-10-24（引擎全面 TypeScript 化 + 七首手写编曲 + 采样本地化 + 分风格技术分册）
+> 最后更新：2026-10-24（引擎 TS 化 + 七首手写编曲 + 采样本地化 + 分风格技术分册；lofi 补齐铺底 / 连奏低音 / 软钢琴 / 磁带底噪）
 
 ---
 
@@ -13,7 +13,7 @@
 | 玩法 | 三个模式共用一套单局骨架：鼓手 / 旋律家 / 节奏 |
 | 引擎 | 纯 TypeScript，不碰 React；画布 2D（音符）+ WebGL（氛围层） |
 | 音频 | 两套独立 AudioContext：**对局**（sfx.ts）与**背景音乐**（bgm/） |
-| 分册 | 每种风格一套编制 + 一册文档，见 §6.7；lofi 已完成 |
+| 分册 | 每种风格一套**编作曲逻辑**（五层 + 四件套）+ 一册文档，见 §6.7；lofi 已完成 |
 | 素材 | 67 个 mp3，1.42MB，全部本地（`public/assets`），不走 CDN |
 | 离线 | precache 应用外壳 607KB；采样走运行时 `CacheFirst`，不占首装 |
 | 类型 | `strict` + `noUnusedLocals` + `noUnusedParameters`，`tsc --noEmit` 是构建第一步 |
@@ -31,7 +31,9 @@ apps/pwa/
 │  ├─ scene.ts          WebGL 氛围层：5 套 GLSL + 一套公共框架
 │  ├─ backing.ts        伴奏排程：按 GROOVE 生成鼓 / 贝斯 / 和声事件
 │  ├─ lofi-kit.ts       lofi 套鼓：纯合成，两套预设随机，对局与 BGM 共用
-│  └─ bgm/              背景音乐，7 个模块，见第 6 节
+│  ├─ tape.ts           磁带底噪：嘶声 + 噼啪，离线渲染成 9.7 s 循环
+│  ├─ space.ts          BGM 混响用的房间冲激响应（算出来的，无素材）
+│  └─ bgm/              背景音乐，8 个模块，见第 6 节
 ├─ src/components/      界面（首页 / HUD / 结算 / 设置 / 暂停 / 更新条）
 ├─ src/hooks/           快照订阅、版本发现、安装提示、BGM 生命周期
 ├─ public/assets/       piano 8 + drums 12 + inst 47 = 67 个 mp3
@@ -181,6 +183,10 @@ useBgm(snapshot)
 
 `scheduleStep(bus, sc, i, t)` 按「第 i 个十六分位」把这一格的贝斯 / 和声 / 鼓排出去，
 一拍最多排一次，不维护事件表 —— 结构谱是固定的，按格算比排序更快。
+铺底垫（`schedulePad`）是例外：它只在和弦变化的那一小节起一次长音，平时一格都不排。
+
+总线结构：`master → lowpass(mix.cut) → destination`，外加两条常驻旁链 ——
+`tape`（底噪，音量由 `Score.tape` 开）与 `rev`（混响送出，`voice(..., { rev })` 往里送）。
 
 ### 6.4 手写编曲（`compose.ts`）
 
@@ -202,10 +208,12 @@ lead: seq([
 | 字段 | 作用 |
 |---|---|
 | `comp.type` | 伴奏型：`pad` / `waltz`（蹦-恰-恰）/ `stab`（切分）/ `pick`（指弹）/ `riff`（强力和弦）/ `arp8` / `hold` |
-| `bass.type` | `quarter` / `eighth` / `half` / `waltz` / `root5` / `riff` |
+| `pad` | 铺底垫：8 小节一片，只在换和弦时起音（没有格位），见 §6.7 |
+| `bass.type` | `quarter` / `eighth` / `half` / `waltz` / `root5` / `riff` / `line`（手写旋律线） |
+| `bass.line` | 有它就忽略 `type`：bars × steps 的绝对 MIDI，时值按到下一个音的距离算成连奏 |
 | `drums` | 底鼓/军鼓的十六分位数组、踩镲型（`eighth` / `16` / `off` / `none`） |
 | `mix` | `cut` 总低通、`lead/comp/bass` 三档音量、`vol` 整首 |
-| `echo` / `vinyl` / `swing` | ping-pong 回声、黑胶底噪、奇数十六分位推后的秒数（`arrange.ts` 逐格加） |
+| `echo` / `tape` / `swing` | ping-pong 回声、磁带底噪、奇数十六分位推后的秒数（`arrange.ts` 逐格加） |
 
 **改一首曲子只动 `compose.ts` 对应那一行**，不用碰排程器。
 
@@ -234,38 +242,49 @@ lead: seq([
 用 ffmpeg 统一转成 `单声道 44.1kHz 96kbps`，并 `atrim + afade` 只留有用的一段。
 **全部落在 `public/assets`，随构建发布，不引用任何 CDN。**
 
-### 6.7 风格分册（每个风格一套编制）
+### 6.7 风格分册（每个风格一套编作曲逻辑）
 
-一个风格要立得住，需要四样东西**同时**到位：
+一个风格要立得住，先定**层**（分工），再定**件**（实现）。层定错了，换什么音色都像"同一首歌换了件衣服"。
+
+| 层 | 职责 | 有没有格位 |
+|---|---|---|
+| 旋律 | 说"这句话" | 有 |
+| 和声（`comp`） | 说"这是什么和弦" | 有 |
+| 铺底（`pad`） | 说"这是在哪" | **没有**（只在换和弦时起音） |
+| 低音 | 说"站在哪块地上" | 有（`line` 型是手写连奏） |
+| 鼓 + 底噪 | 说"什么速度 / 什么年代" | 鼓有，底噪是常驻 |
+
+lofi 是五层全要的风格；摇滚砍掉铺底与底噪，古典砍掉鼓与底噪，8bit 全用合成。
+四样"件"仍然是：编制、音色参数、混音开口、空间。
 
 | 件 | 落在哪 | 举例（lofi） |
 |---|---|---|
-| 编制 | `compose.ts` 每首的 `inst` / `comp` / `bass` / `drums` | 电钢 + 尼龙弦 + 电贝斯 + 合成鼓 |
-| 音色参数 | `voices.ts` 的 `voice()`、`lofi-kit.ts` | 电钢 lp 2600 + 12 ms 叠层 |
-| 混音开口 | `mix.cut` + `lead / comp / bass / vol` | 3200 Hz，0.44 / 0.26 / 0.52 / 1.5 |
-| 空间 | `engine.ts` 的 `vinyl`、`sfx.ts` 的 `SPACES` | 黑胶 0.05 + IR 1.4 s / tape 0.032 |
+| 编制 | `compose.ts` 每首的 `inst` / `comp` / `pad` / `bass` / `drums` | 软钢琴 + 尼龙弦 + 梦幻垫 + 软贝斯 + 合成鼓 |
+| 音色参数 | `voices.ts` 的 `voice()`、`lofi-kit.ts` | 软钢琴 lp 2600 + 14 ms 起音 + 7 音分叠层 |
+| 混音开口 | `mix.cut` + `lead / comp / bass / vol` | 3200 Hz，0.46 / 0.24 / 0.52 / 1.0 |
+| 空间 | `space.ts` 的 `roomIR`、`tape.ts`、`sfx.ts` 的 `SPACES` | 房间 1.9 s / pad 送出 0.55 / 磁带 0.13 |
 
 只换鼓组、或只改 `cut`，得到的是「同一首歌换了件衣服」。五个风格当前各自的一套：
 
-| 风格 | 主奏 | 和声 | 低音 | 鼓 | cut |
-|---|---|---|---|---|---|
-| `pixel` | `chipLead` 方波 | `chipLead` arp8 | `chipBass` 三角 | `chip` 全合成 | 8200 |
-| `cyber` | `bell` / `pluck` | `saw` pad / `epiano` stab | `ebass` / `sub` | `techno` / `kpr77` | 13000 / 9000 |
-| `classic` | `violin` | `piano` waltz | `cello` | 无 | 11000 |
-| `lofi` | `epiano` / `flute` | `nylon` arp8 / pick | `ebass` half / `nylon` root5 | `lofi` 合成 | 3200 / 8000 |
-| `rock` | `egt` 失真 | `egt` riff | `ebass` eighth | `acoustic` | 6400 |
+| 风格 | 旋律 | 和声 | 铺底 | 低音 | 鼓 | 底噪 | cut |
+|---|---|---|---|---|---|---|---|
+| `pixel` | `chipLead` 方波 | `chipLead` arp8 | — | `chipBass` 三角 | `chip` 全合成 | — | 8200 |
+| `cyber` | `bell` / `pluck` | `saw` pad / `epiano` stab | — | `ebass` / `sub` | `techno` / `kpr77` | — | 13000 / 9000 |
+| `classic` | `violin` | `piano` waltz | — | `cello` | 无 | — | 11000 |
+| `lofi` | `softPiano` | `nylon` arp8 / pick | `pad` 8 小节 | `bassLofi` line | `lofi` 合成 | `tape` 0.10–0.13 | 3200 / 8000 |
+| `rock` | `egt` 失真 | `egt` riff | — | `ebass` eighth | `acoustic` | — | 6400 |
 
 每种风格一册，逐册调优、逐册记录：
 
 | 册 | 状态 | 内容 |
 |---|---|---|
-| [`tech-lofi.md`](tech-lofi.md) | **已完成** | 两首 lofi 的编曲、作曲、鼓组参数表、混音基线、调参手册、反例 |
+| [`tech-lofi.md`](tech-lofi.md) | **已完成** | 两首 lofi 的层表、编曲、作曲、音色参数、混音基线、调参手册、反例 |
 | `tech-classic.md` | 待写 | 钢琴三重奏、三拍子重心、无鼓时的空间处理 |
 | `tech-rock.md` | 待写 | 失真吉他、power chord、重鼓与削波余量 |
 | `tech-cyber.md` | 待写 | FM 钟、超锯齿、ping-pong 回声、sub 与低频管理 |
 | `tech-pixel.md` | 待写 | 方波 / 三角波、限色、谱面即旋律 |
 
-写下一册时照 [`tech-lofi.md` §9](tech-lofi.md) 的模板：四件套原则、必答的 8 个问题、维护规则。
+写下一册时照 [`tech-lofi.md` §9](tech-lofi.md) 的模板：五层 + 四件套、必答的 8 个问题、维护规则。
 
 ---
 
@@ -367,6 +386,10 @@ ffmpeg -i take.webm -af volumedetect -f null -      # RMS 与峰值
 | 采样（换音色 / 加音域） | `public/assets/inst/…` + `bgm/samples.ts` 的 `SAMPLES` |
 | 对局音色、混响空间 | `sfx.ts` 的 `SPACES` / `BUS_DEF` / `INST` |
 | lofi 鼓的手感（软硬、胖瘦） | `lofi-kit.ts` 的 `BRIGHT` / `TAPE` 两套预设 |
+| lofi 低音线（音高、格位） | `bgm/compose.ts` 对应曲目的 `bass.line` |
+| 梦幻垫的宽窄与深度 | `compose.ts` 的 `pad`（增益 / 送出）+ `voices.ts` 的 `softPad` |
+| 磁带底噪的质感 | `tape.ts`（嘶声比、噼啪密度）+ `Score.tape`（电平） |
+| BGM 混响的房间 | `space.ts` 的 `roomIR` 参数（`dur` / `decay` / `bright`） |
 | 伴奏律动（鼓型、切分） | `backing.ts` 的 `GROOVE` |
 | 场景配色与氛围 | `scene.ts` 对应 shader 的 `renderScene()` |
 | 缓存策略、版本号 | `vite.config.ts` |
