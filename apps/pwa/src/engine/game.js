@@ -94,16 +94,16 @@ const RHYTHM_SEG = 16;
 const RHYTHM_STEP = 10;
 
 const SONGS = [
+  /* 唯一一首「有谱」的曲子：编曲来自 bgm.js 那份 8bit 循环。
+     旋律不预录，玩家打的每个音就是旋律本身。放在首位，也是缺省曲目。 */
+  { id: 'arcade',name: '像素心跳', tag: '8bit · 方波', scene: 'pixel',   bpm: 132, meter: 4, root: 69, scale: 'min', chords: ['Am', 'F', 'C', 'G'],
+    arcade: true, inst: 'chip', kit: 'chip', space: 'chip' },
   { id: 'neon',  name: '霓虹脉冲', tag: '电子 · 正拍', scene: 'cyber',   bpm: 84, meter: 4, root: 72, scale: 'maj', chords: ['C', 'Am', 'F', 'G'] },
   { id: 'city',  name: '城市夜行', tag: '电子 · 切分', scene: 'cyber',   bpm: 96, meter: 4, root: 67, scale: 'maj', chords: ['G', 'D', 'Em', 'C'] },
   { id: 'waltz', name: '月下圆舞', tag: '古典 · 三拍', scene: 'classic', bpm: 72, meter: 3, root: 65, scale: 'maj', chords: ['F', 'C', 'F', 'C'] },
   { id: 'breath',name: '长呼吸',   tag: '慵懒 · 长音', scene: 'lofi',    bpm: 64, meter: 4, root: 69, scale: 'min', chords: ['Am', 'F', 'C', 'G'] },
   { id: 'rain',  name: '雨窗午后', tag: '慵懒 · 五声', scene: 'lofi',    bpm: 68, meter: 4, root: 74, scale: 'maj', chords: ['D', 'G', 'A', 'D'] },
   { id: 'live',  name: '地下现场', tag: '摇滚 · 强拍', scene: 'rock',    bpm: 88, meter: 4, root: 72, scale: 'maj', chords: ['C', 'F', 'G', 'Am'] },
-  /* 唯一一首「有谱」的曲子：编曲来自 bgm.js 那份 8bit 循环。
-     旋律不预录，玩家打的每个音就是旋律本身。 */
-  { id: 'arcade',name: '像素心跳', tag: '8bit · 方波', scene: 'pixel',   bpm: 132, meter: 4, root: 69, scale: 'min', chords: ['Am', 'F', 'C', 'G'],
-    arcade: true, inst: 'chip', kit: 'chip', space: 'chip' },
 ];
 
 const NOTE_SEMI = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
@@ -168,7 +168,7 @@ const S = {
   phase: 'home',
   mode: 'drummer',
   song: SONGS[0],
-  pick: 'neon',
+  pick: 'arcade',
   diff: 'normal',
   style: 'straight',
   bpmBase: STYLES.straight.bpm,
@@ -453,7 +453,7 @@ function buildChart() {
    这样不用看音名也能感觉到旋律在往上还是往下走。
    ============================================================ */
 function buildArcadeChart(song) {
-  const sc = window.BGM && window.BGM.score;
+  const sc = window.BGM && window.BGM.scoreOf(song);
   if (!sc) return [];
 
   const beat = 60 / song.bpm;
@@ -2062,6 +2062,9 @@ function snapshot() {
     diff: S.diff,
     style: S.style,
     pick: S.pick,
+    /* 整条曲目定义给 UI 用：BGM 得按它生成编曲（速度、和弦、场景音色），
+       只给 id 的话 UI 还要再去 SONGS 里查一次，节奏模式那首虚拟曲目就查不到。 */
+    song: S.song,
     songName: S.song.name,
     songTag: S.song.tag,
     songBpm: S.song.bpm,
@@ -2153,6 +2156,9 @@ export function stepBpm(delta) {
   settings.bpm = clamp(curBpm() + delta, 40, 200);
   S.bpmBase = settings.bpm;
   persist();
+  /* 节奏模式没有固定曲目，速度就是「曲目」本身：首页 BGM 得跟着变。
+     换一个新对象引用，BGM 那边的去重才认得出来。 */
+  if (S.mode === 'rhythm') S.song = Object.assign({}, S.song, { bpm: settings.bpm });
   emit();
 }
 

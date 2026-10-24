@@ -79,6 +79,8 @@ export interface GameSnapshot {
   diff: Difficulty;
   style: StyleId;
   pick: string;
+  /** 当前曲目：BGM 用它生成编曲，也决定主题场景 */
+  song: SongDef;
   songName: string;
   songTag: string;
   songBpm: number;
@@ -116,6 +118,11 @@ export interface SongDef {
   scene: SceneId;
   bpm: number;
   meter: number;
+  /** 旋律的调中心与音阶，随机生成谱面时用 */
+  root: number;
+  scale: 'maj' | 'min';
+  /** 和弦进行，循环使用 */
+  chords: string[];
   /** 有固定编曲（谱面来自编曲旋律，而不是随机生成） */
   arcade?: boolean;
 }
@@ -141,10 +148,14 @@ export const TIMBRES = TIMBRES_RAW as unknown as TimbreDef[];
 export const SCENES = SCENES_RAW as unknown as Record<SceneId, SceneDef>;
 export const RHYTHM_STEP = RHYTHM_STEP_RAW as number;
 
-/** 8bit 背景音乐。独立于「音效」开关：演奏时静音，首页和结算页循环。 */
+/** 背景音乐。独立于「音效」开关：演奏时静音，首页和结算页循环。 */
 interface BgmApi {
+  /** 换曲目：速度、和弦、音色一起换，运行中会交叉淡入淡出 */
+  setSong: (song: SongDef) => void;
   play: () => void;
   stop: () => void;
+  /** 取一段时域波形（-1..1），返回 false 表示此刻没在响 */
+  waveform: (out: Float32Array) => boolean;
   readonly running: boolean;
 }
 
@@ -153,8 +164,10 @@ interface BgmWindow extends Window {
 }
 
 export const bgm: BgmApi = {
+  setSong: (song) => (window as unknown as BgmWindow).BGM?.setSong(song),
   play: () => (window as unknown as BgmWindow).BGM?.play(),
   stop: () => (window as unknown as BgmWindow).BGM?.stop(),
+  waveform: (out) => (window as unknown as BgmWindow).BGM?.waveform(out) ?? false,
   get running() {
     return !!(window as unknown as BgmWindow).BGM?.running;
   },

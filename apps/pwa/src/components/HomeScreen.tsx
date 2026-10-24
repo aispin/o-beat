@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { MonitorDown, Settings2 } from 'lucide-react';
 
+import { BgmWave } from '@/components/BgmWave';
 import { Button } from '@/components/ui/button';
 import {
   DIFF_NOTE,
@@ -120,22 +121,25 @@ export function HomeScreen({
         <Settings2 className="size-[18px]" />
       </button>
 
-      <div className="home-scroll">
-        <header className="mb-6 flex items-center gap-3 pr-12">
-          <div className="brand-fill brand-glow grid size-[46px] shrink-0 place-items-center rounded-full text-[21px] font-bold text-[#06100E]">
-            O
-          </div>
-          <div className="min-w-0 flex-1">
-            <h1 className="text-[19px] font-bold leading-none tracking-[3.4px]">O MY BEAT</h1>
-            <p className="mt-1 text-[11px] tracking-[0.6px] text-muted-foreground">
-              节奏练习 · 音感训练
-            </p>
-          </div>
-          <span className="brand-text shrink-0 rounded-full border border-brand/40 bg-brand/10 px-2.5 py-1 text-[10px] font-semibold tracking-wide">
-            {snap.sceneLabel}
-          </span>
-        </header>
+      {/* 标题栏固定在顶部：曲目多起来之后列表要滚，品牌行必须留在视野里。
+          它不跟着滚动区走，所以触摸穿透（pointer-events: none）由样式层给，
+          从这条带上往下拖也能正常滚动列表。 */}
+      <header className="home-head">
+        <div className="brand-fill brand-glow grid size-[46px] shrink-0 place-items-center rounded-full text-[21px] font-bold text-[#06100E]">
+          O
+        </div>
+        <div className="min-w-0 flex-1">
+          <h1 className="text-[19px] font-bold leading-none tracking-[3.4px]">O MY BEAT</h1>
+          <p className="mt-1 text-[11px] tracking-[0.6px] text-muted-foreground">
+            节奏练习 · 音感训练
+          </p>
+        </div>
+        <span className="brand-text shrink-0 rounded-full border border-brand/40 bg-brand/10 px-2.5 py-1 text-[10px] font-semibold tracking-wide">
+          {snap.sceneLabel}
+        </span>
+      </header>
 
+      <div className="home-scroll">
         <Block title="模式">
           <div className="grid grid-cols-3 gap-2">
             {MODES.map((m) => {
@@ -323,8 +327,15 @@ export function HomeScreen({
       </div>
 
       <div className="cta-dock">
-        <Button size="cta" onClick={() => game.start()}>
-          {rhythm ? '开始练习' : '开始演奏'}
+        {/* 按钮里垫一条 BGM 的实时波形：用户在首页就能「看见」正在放的这首曲子，
+            也能一眼确认背景音乐开关是开着的。 */}
+        <Button
+          size="cta"
+          className="relative overflow-hidden"
+          onClick={() => game.start()}
+        >
+          <BgmWave />
+          <span className="relative">{rhythm ? '开始练习' : '开始演奏'}</span>
         </Button>
         <p className="mt-3 text-center text-[11px] tracking-wide text-text-dim">
           {rhythm ? '跟着节拍器敲 · 灰色段要留白 · 没有失败' : '跟着拍子敲准就好 · 没有失败'}

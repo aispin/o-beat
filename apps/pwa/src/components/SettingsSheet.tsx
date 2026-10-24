@@ -152,7 +152,7 @@ export function SettingsSheet({
           <Switch checked={s.sound} onCheckedChange={(v) => game.setSettings({ sound: v })} />
         </Row>
 
-        <Row label="背景音乐" hint="8bit 循环，演奏时自动静音">
+        <Row label="背景音乐" hint="按当前曲目生成，演奏时自动静音">
           <Switch checked={s.bgm} onCheckedChange={(v) => game.setSettings({ bgm: v })} />
         </Row>
 

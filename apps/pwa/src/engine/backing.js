@@ -227,10 +227,10 @@
        ------------------------------------------------------------
        旋律不在这里排 —— 玩家打的每个音就是旋律音，伴奏只负责贝斯、
        琶音和鼓。所以漏音的时候这三层还在，音乐不会散成一地。
-       数据来自 BGM.score，和首页循环播放的是同一份定义。 */
+       数据来自 BGM.scoreOf(song)，和首页循环播放的是同一份定义。 */
     buildArcade(song, bars) {
       const S = global.SFX;
-      const sc = global.BGM && global.BGM.score;
+      const sc = global.BGM && global.BGM.scoreOf(song);
       if (!sc) { this.events = []; this.idx = 0; this.mode = 'music'; return []; }
 
       const beat = 60 / song.bpm;
