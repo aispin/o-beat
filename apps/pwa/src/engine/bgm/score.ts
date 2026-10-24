@@ -1,12 +1,13 @@
 /* 把「曲目定义」变成「编曲数据」。
-   有手写编曲的走 COMPOSE，没有的退到参数生成。
+   优先级：ABC 谱 > 手写编曲（COMPOSE）> 参数生成。
    生成器写不出动机，出来的旋律每小节一个形状 —— 只配当兜底。 */
 import type { Chord, Score, SongLike } from './types';
-import { COMPOSE, FALLBACK_VOICE } from './compose';
+import { ARP_ORDER, BASS_OCT, COMPOSE, FALLBACK_VOICE, PROG_SHAPE } from './compose';
+import { chordOf } from '../chords';
+import { ABC_SONGS } from '../abc/songs';
+import { scoreFromAbc } from '../abc';
 
 export const BARS = 8;
-
-const NOTE_SEMI: Record<string, number> = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
 
 const MOTIFS = [
   [0, 1, 2, 1, 2, 1],
@@ -16,9 +17,6 @@ const MOTIFS = [
   [2, 0, 2, 1, 2, 3],
 ];
 const ONSETS = [0, 2, 4, 6, 8, 10];
-const PROG_SHAPE = [0, 0, 1, 1, 2, 2, 3, 3];
-const ARP_ORDER = [0, 1, 2, 1];
-const BASS_OCT = [0, 0, 7, 0, 0, 7, 0, 12];
 
 export const FALLBACK_SONG: SongLike = {
   id: 'arcade',
@@ -47,13 +45,6 @@ function mulberry32(a: number): () => number {
     t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
-}
-
-function chordSemis(name: string): [number, number, number] {
-  const m = /^([A-G])(m?)$/.exec(name);
-  const root = m ? NOTE_SEMI[m[1]] : 0;
-  const minor = m ? m[2] === 'm' : false;
-  return minor ? [root, root + 3, root + 7] : [root, root + 4, root + 7];
 }
 
 /** 兜底旋律：从和弦音里按种子挑动机 */
@@ -95,6 +86,11 @@ function melodyFor(chords: Chord[], prog: number[], steps: number, seed: number,
 
 export function buildScore(song?: SongLike): Score {
   const s = song || FALLBACK_SONG;
+
+  // 自带谱优先，其次谱库：音符、和弦、速度、拍号全部来自 ABC
+  const abc = s.abc || (s.id ? ABC_SONGS[s.id] : undefined);
+  if (abc) return scoreFromAbc(abc, s, s.scene);
+
   const bpm = s.bpm || 96;
   const meter: 3 | 4 = s.meter === 3 ? 3 : 4;
   const steps = meter * 4;
@@ -103,8 +99,10 @@ export function buildScore(song?: SongLike): Score {
   const fb = FALLBACK_VOICE[s.scene || 'cyber'] || FALLBACK_VOICE.cyber;
 
   const chords: Chord[] = names.map((n) => {
-    const semi = chordSemis(n);
-    return { root: 36 + semi[0], tones: [48 + semi[0], 48 + semi[1], 48 + semi[2]] };
+    const r = chordOf(n);
+    if (r) return r.chord;
+    const fb = chordOf('C');
+    return (fb as { chord: Chord }).chord;
   });
 
   const prog: number[] = [];
@@ -154,7 +152,7 @@ const cache = new Map<string, Score>();
 
 export function scoreOf(song?: SongLike): Score {
   const s = song || FALLBACK_SONG;
-  const key = [s.id, s.bpm, s.meter, s.scene, (s.chords || []).join('')].join('|');
+  const key = [s.id, s.bpm, s.meter, s.scene, (s.chords || []).join(''), s.abc || ''].join('|');
   let sc = cache.get(key);
   if (!sc) {
     sc = buildScore(s);

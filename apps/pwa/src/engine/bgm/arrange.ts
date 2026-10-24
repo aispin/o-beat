@@ -247,11 +247,14 @@ export function scheduleStep(bus: Bus, sc: Score, i: number, t: number): void {
   const leadGain = sc.mix.lead;
   // 摇摆：当前格的 s 是奇数就推后。t 已是本格时间，所以只补一次。
   const hit = t + (s % 2 ? sc.swing : 0);
-  voice(bus, sc.inst, m, hit, st * 3.2, leadGain, -0.12);
+  /* 时值优先用谱面写的（ABC 的 leadDur），手写编曲没有就按 3.2 格 —— 那是一个
+     "让钢琴踏板踩住"的长度，不是音符本身的节奏。 */
+  const dur = (sc.leadDur && sc.leadDur[bar] && sc.leadDur[bar][s]) || st * 3.2;
+  voice(bus, sc.inst, m, hit, dur, leadGain, -0.12);
   if (sc.echo) {
     // 延迟回声：3 个十六分位后一条弱的，模拟 ping-pong delay
-    voice(bus, sc.inst, m, hit + st * 3, st * 2.4, leadGain * sc.echo, 0.34);
-    voice(bus, sc.inst, m, hit + st * 6, st * 2.0, leadGain * sc.echo * 0.45, -0.3);
+    voice(bus, sc.inst, m, hit + st * 3, dur * 0.75, leadGain * sc.echo, 0.34);
+    voice(bus, sc.inst, m, hit + st * 6, dur * 0.62, leadGain * sc.echo * 0.45, -0.3);
   }
 
   // 噪声瞬态给强拍的旋律一点"咬合感"（摇滚和电子都要）

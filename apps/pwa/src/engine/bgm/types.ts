@@ -103,6 +103,9 @@ export interface Score {
   chords: Chord[];
   /** 旋律：bars × steps，null 是留白 */
   lead: (number | null)[][];
+  /** 每个旋律音的实际时值（格）。ABC 谱里写的长度；没有就用固定的 3.2 格。
+      放在与 lead 同形的二维数组里，休止格是 0。 */
+  leadDur?: number[][];
   inst: VoiceName;
   comp: CompSpec;
   /** 铺底垫。没有这一层（电子、摇滚）就不写 */
@@ -131,6 +134,8 @@ export interface SongLike {
   chords?: string[];
   scale?: string;
   arcade?: boolean;
+  /** 直接带一份 ABC 谱（优先于谱库）。给试听、外部谱、以后的自定义曲用 */
+  abc?: string;
 }
 
 /** 音频总线：各模块共享的上下文与缓存 */

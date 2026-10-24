@@ -9,6 +9,7 @@
 | 玩法与数值 | [`docs/prd.md`](docs/prd.md) — 唯一依据 |
 | 实现细节 | [`docs/tech.md`](docs/tech.md) — 分层、音频、采样、编曲格式、验证方法 |
 | lofi 风格方案 | [`docs/tech-lofi.md`](docs/tech-lofi.md) — 编曲、作曲、音色参数、混音基线、调参手册 |
+| 写谱（ABC） | [`docs/abc.md`](docs/abc.md) — 子集语法、`%%OB` 指令、加新曲、调优示范 |
 | 视觉依据 | `prototype/`（冻结的高保真原型，只读参考） |
 
 ## 仓库结构
@@ -22,7 +23,9 @@
 │  │  ├─ sfx.ts         对局音频：采样 + 物理建模 + 卷积混响 + 程序化音效
 │  │  ├─ scene.ts       WebGL 氛围层（5 套 GLSL）
 │  │  ├─ backing.ts     伴奏排程（按 GROOVE 生成鼓 / 贝斯 / 和声）
+│  │  ├─ abc/           ABC 谱引擎：parse → style → toScore
 │  │  └─ bgm/           背景音乐：compose → score → arrange → voices
+│  ├─ src/songs/        谱库：一首一个 .abc
 │  ├─ src/components/   界面层（shadcn 组件 + 页级组件）
 │  ├─ src/hooks/        快照订阅、版本发现、BGM 生命周期
 │  └─ public/assets/    采样 67 个 mp3 / 1.42MB（钢琴 8 + 鼓 12 + 六件乐器 47）
@@ -43,6 +46,7 @@ pnpm dev            # http://localhost:5173
 pnpm typecheck      # 仅类型检查
 pnpm build          # tsc --noEmit && vite build → apps/pwa/dist
 pnpm build:gh       # 同上，base=/o-beat/（GitHub Pages 用）
+pnpm --filter @o-beat/pwa abc:check   # ABC 引擎自检（25 项）
 ```
 
 要求 Node ≥ 22、pnpm ≥ 12。
@@ -55,20 +59,19 @@ pnpm build:gh       # 同上，base=/o-beat/（GitHub Pages 用）
   经乐器总线 → 卷积混响 → 胶水压缩 → 限幅。MISS 只是不播击打音，伴奏（`backing.ts`）不断。
 - **背景音乐**（`bgm/`）：首页与结算循环当前曲目，演奏时自动静音。
 
-七首曲子都是**手写编曲**，不是生成器产物。旋律写在 `bgm/compose.ts` 里，一小节一行、
-16 格（3/4 为 12 格）、`.` 是留白、数字是绝对 MIDI：
+七首曲子都是**手写编曲**，不是生成器产物。lofi 的两首已经搬进 **ABC 谱**
+（`apps/pwa/src/songs/*.abc`）：谱只写音符与和弦，风格写在 `abc/style.ts` 的预设里，
+一行 `%%OB style rock` 就能让同一份谱换一套乐器。其余五首仍在 `bgm/compose.ts`。
 
-```ts
-lead: seq([
-  '76 . . . 79 . . . 81 . . . 79 . . .',
-  '. . 74 . 76 . . . 79 . . . . . . .',
-])
+```
+"Am" c4 z2 e2 g8 |      ← 谱：谁在什么时候响
+%%OB style lofi        ← 风格：用什么响、多大声、什么空间
 ```
 
-改**一首曲子**的旋律、音色、音量只动这一个文件；改**一个风格**要动的是整套编作曲逻辑 ——
+改**一首曲子**只动它的谱；改**一个风格**要动的是整套编作曲逻辑 ——
 先定**层**（旋律 / 和声 / 铺底 / 低音 / 鼓与底噪），再定**件**（编制 / 音色参数 / 混音开口 / 空间）。
 每个风格一册记录在案，目前有 [`docs/tech-lofi.md`](docs/tech-lofi.md)，
-层表与编制总表见 [`docs/tech.md`](docs/tech.md) §6.7。
+谱的写法见 [`docs/abc.md`](docs/abc.md)，层表与编制总表见 [`docs/tech.md`](docs/tech.md) §6.7。
 
 音色用真实乐器采样（CC0），**全部落在 `public/assets/inst/`，随构建发布，不引用 CDN**。
 
@@ -148,3 +151,5 @@ pnpm --filter @o-beat/pwa gen:social   # 生成 public/og.png 与 public/screens
   界面用框架、引擎不碰 React，两边的边界是一个快照对象。
 - [`docs/adr/0002-handwritten-score-and-samples.md`](docs/adr/0002-handwritten-score-and-samples.md)：
   为什么把生成式旋律换成手写编曲、为什么音色用本地采样、为什么引擎全面 TS 化。
+- [`docs/adr/0003-abc-score-engine.md`](docs/adr/0003-abc-score-engine.md)：
+  为什么自写 ABC 子集解析器而不是引 abcjs（512 KB 的排版 AST），谱与风格怎么分开。

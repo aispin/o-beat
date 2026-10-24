@@ -1,7 +1,7 @@
 # O My Beat · 技术文档
 
 > 面向接手代码的人。产品规则看 [`prd.md`](prd.md)，本文只讲**怎么实现、为什么这么实现、改东西该动哪里**。
-> 最后更新：2026-10-24（引擎 TS 化 + 七首手写编曲 + 采样本地化 + 分风格技术分册；lofi 补齐铺底 / 连奏低音 / 软钢琴 / 磁带底噪）
+> 最后更新：2026-10-24（引擎 TS 化 + 采样本地化 + 分风格技术分册；lofi 补齐五层；lofi 两首谱搬进 ABC 引擎）
 
 ---
 
@@ -14,8 +14,9 @@
 | 引擎 | 纯 TypeScript，不碰 React；画布 2D（音符）+ WebGL（氛围层） |
 | 音频 | 两套独立 AudioContext：**对局**（sfx.ts）与**背景音乐**（bgm/） |
 | 分册 | 每种风格一套**编作曲逻辑**（五层 + 四件套）+ 一册文档，见 §6.7；lofi 已完成 |
+| 谱 | ABC 子集解析器，一首一个 `.abc`，谱与风格分开，见 §6.8 |
 | 素材 | 67 个 mp3，1.42MB，全部本地（`public/assets`），不走 CDN |
-| 离线 | precache 应用外壳 607KB；采样走运行时 `CacheFirst`，不占首装 |
+| 离线 | precache 应用外壳 630KB；采样走运行时 `CacheFirst`，不占首装 |
 | 类型 | `strict` + `noUnusedLocals` + `noUnusedParameters`，`tsc --noEmit` 是构建第一步 |
 
 ---
@@ -33,9 +34,12 @@ apps/pwa/
 │  ├─ lofi-kit.ts       lofi 套鼓：纯合成，两套预设随机，对局与 BGM 共用
 │  ├─ tape.ts           磁带底噪：嘶声 + 噼啪，离线渲染成 9.7 s 循环
 │  ├─ space.ts          BGM 混响用的房间冲激响应（算出来的，无素材）
+│  ├─ chords.ts         和弦名 → 三个音（手写编曲与 ABC 共用）
+│  ├─ abc/              ABC 谱：parse / style / toScore / songs，见 §6.8
 │  └─ bgm/              背景音乐，8 个模块，见第 6 节
 ├─ src/components/      界面（首页 / HUD / 结算 / 设置 / 暂停 / 更新条）
 ├─ src/hooks/           快照订阅、版本发现、安装提示、BGM 生命周期
+├─ src/songs/           谱库：一首一个 .abc
 ├─ public/assets/       piano 8 + drums 12 + inst 47 = 67 个 mp3
 └─ vite.config.ts       PWA / precache / 运行时缓存 / 版本注入
 ```
@@ -45,6 +49,7 @@ pnpm dev            # 5173
 pnpm typecheck      # tsc --noEmit
 pnpm build          # tsc --noEmit && vite build
 pnpm build:gh       # base=/o-beat/，GitHub Pages
+pnpm --filter @o-beat/pwa abc:check   # ABC 引擎自检（25 项）
 ```
 
 Node ≥ 22，pnpm ≥ 12。
@@ -190,7 +195,8 @@ useBgm(snapshot)
 
 ### 6.4 手写编曲（`compose.ts`）
 
-七首曲子都是**手写数据**，不是生成器产物。上一版按「和弦音 + 种子挑动机」生成旋律，
+**长呼吸与雨窗午后已经搬进 ABC 谱**（§6.8），这个文件现在负责剩下五首；
+没有谱的曲目仍然走"手写数据 > 参数生成"的兜底。手写数据不是生成器产物。上一版按「和弦音 + 种子挑动机」生成旋律，
 结果每首都是「每小节六个等距音」，听十秒就分不清。手写才有动机、有呼吸、有句尾。
 
 旋律写成字符串：**一小节一行、16 格（3/4 是 12 格）、`.` 是留白、数字是绝对 MIDI**。
@@ -216,6 +222,7 @@ lead: seq([
 | `echo` / `tape` / `swing` | ping-pong 回声、磁带底噪、奇数十六分位推后的秒数（`arrange.ts` 逐格加） |
 
 **改一首曲子只动 `compose.ts` 对应那一行**，不用碰排程器。
+有谱的曲子（长呼吸 / 雨窗午后）连这一行都不用动 —— 改 `src/songs/<id>.abc`。
 
 ### 6.5 结构谱与缓存
 
@@ -223,8 +230,12 @@ lead: seq([
 和弦名 → 绝对音高、8 小节进行、每小节用第几个和弦（`prog`）、以及给伴奏层用的
 `bassOct` / `arpOrder`。
 
-`scoreOf(song)` 按 `id|bpm|meter|scene|chords` 缓存。同一首曲子反复进出首页必须完全一致，
+`scoreOf(song)` 按 `id|bpm|meter|scene|chords|abc` 缓存。同一首曲子反复进出首页必须完全一致，
 否则用户会听到另一段旋律。
+
+优先级：`song.abc`（自带谱）> 谱库 `ABC_SONGS[id]` > `COMPOSE` 手写 > 参数生成。
+谱面自带 `Q:` 与和弦，所以谱库里的曲子以谱为准 —— 曲目定义的 bpm / chords 只用于交叉检查
+与对局衬底。
 
 ### 6.6 采样加载
 
@@ -288,6 +299,31 @@ lofi 是五层全要的风格；摇滚砍掉铺底与底噪，古典砍掉鼓与
 
 ---
 
+### 6.8 谱面：ABC（`abc/`）
+
+长呼吸与雨窗午后的音符从 `compose.ts` 搬进了 `src/songs/*.abc`。
+一份谱只写**音符与和弦**；**风格**（编制 / 音色 / 混音 / 空间）写在 `abc/style.ts` 的预设里，
+曲目用 `%%OB style lofi` 选一套，再按需用 `%%OB` 逐字段覆盖。
+
+| 文件 | 职责 |
+|---|---|
+| `abc/parse.ts` | ABC 子集 → `AbcTune`：八度、调号与临时记号、时值（量化到十六分格）、小节线、反复、和弦记号、多声部、`%%OB` 指令 |
+| `abc/style.ts` | 五个风格预设 + 指令解释（`inst` / `comp` / `pad` / `bass` / `drums` / `mix` / `tape` / `swing` / `echo`） |
+| `abc/toScore.ts` | 谱 + 风格 → `Score`：`lead` + `leadDur`、`bass.line`、每小节和弦，其余取预设 |
+| `abc/songs.ts` | 曲目 id → 谱面原文（Vite `?raw` 导入） |
+| `chords.ts` | 和弦名 → 三个音，手写路径与 ABC 路径共用 |
+
+两个为此加的字段：
+
+- `Score.leadDur`：每个旋律音的时值（格）。谱面写了多少就响多久；手写编曲不填，沿用 3.2 格。
+- `SongLike.abc`：曲目自带一份谱，优先于谱库 —— 试听、外部谱、以后的自定义曲都走它。
+
+**为什么自写解析器、为什么不是 abcjs**：见 [ADR 0003](adr/0003-abc-score-engine.md)。
+abcjs 的 `abcjs-basic-min.js` 是 512 KB，且 `parseOnly` 给的是排版 AST（`pitch` 是音级），
+调号与格号仍要自己算。写谱方法、指令表、调优示范见 [`abc.md`](abc.md)。
+
+验证：`pnpm --filter @o-beat/pwa abc:check` —— 25 项，覆盖解析器边界、两首谱逐格落点、换风格。
+
 ## 7. 场景层（`scene.ts`）
 
 5 套 GLSL：`cyber`（赛博朋克）、`classic`（音乐家的房间）、`lofi`（慵懒房间）、
@@ -326,6 +362,7 @@ Chrome 不会给安装入口。
 
 ```bash
 pnpm typecheck && pnpm build      # 类型 + 构建；构建第一步就是 tsc
+pnpm --filter @o-beat/pwa abc:check   # 动过谱或 abc/ 就必须跑
 ```
 
 ### 9.2 冒烟（无头浏览器）
@@ -380,13 +417,14 @@ ffmpeg -i take.webm -af volumedetect -f null -      # RMS 与峰值
 | 判定窗口、计分、BPM 阶梯 | `game.ts` 的 `CFG` |
 | 曲目列表 / 调性 / 拍号 | `game.ts` 的 `SONGS` |
 | 某个模式的谱面密度 | `game.ts` 的 `buildChart()` 分支 |
-| 某首曲子的旋律、伴奏型、音量 | `bgm/compose.ts` 对应那一行 |
+| 某首曲子的**旋律 / 和弦 / 速度** | `src/songs/<id>.abc`（lofi 两首）；其余 `bgm/compose.ts` |
+| 某首曲子的**伴奏型 / 音色 / 混音** | `src/songs/<id>.abc` 的 `%%OB`，或 `abc/style.ts` 的预设 |
+| **加一首曲子** | 放一个 `.abc` + `abc/songs.ts` 登记 + `game.ts` 的 `SONGS` 加一条 |
 | **lofi 的编曲 / 音色 / 混音细节** | **[`tech-lofi.md`](tech-lofi.md)** — 参数表、调参手册、反例 |
-| 新增一首曲子 | `bgm/compose.ts` 加一条 + `game.ts` 的 `SONGS` 加一条 |
 | 采样（换音色 / 加音域） | `public/assets/inst/…` + `bgm/samples.ts` 的 `SAMPLES` |
 | 对局音色、混响空间 | `sfx.ts` 的 `SPACES` / `BUS_DEF` / `INST` |
 | lofi 鼓的手感（软硬、胖瘦） | `lofi-kit.ts` 的 `BRIGHT` / `TAPE` 两套预设 |
-| lofi 低音线（音高、格位） | `bgm/compose.ts` 对应曲目的 `bass.line` |
+| lofi 低音线（音高、格位） | `src/songs/breath.abc` 的 `V:bass` 声部 |
 | 梦幻垫的宽窄与深度 | `compose.ts` 的 `pad`（增益 / 送出）+ `voices.ts` 的 `softPad` |
 | 磁带底噪的质感 | `tape.ts`（嘶声比、噼啪密度）+ `Score.tape`（电平） |
 | BGM 混响的房间 | `space.ts` 的 `roomIR` 参数（`dur` / `decay` / `bright`） |

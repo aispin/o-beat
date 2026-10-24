@@ -1,0 +1,33 @@
+% 雨窗午后 · lofi / 指弹民谣
+% 同一份谱换个 style 就是另一首歌的感觉：这里用 lofi 打底，只覆盖"更亮、更干、不摇摆"的几项。
+
+X:2
+T:雨窗午后
+C:o-beat
+M:4/4
+L:1/16
+Q:1/4=68
+K:D
+%%OB style lofi
+%%OB comp pick nylon oct=12 gain=0.30
+%%OB pad gain=0.036 rev=0.50
+%%OB drums kick=0,8 snare=4,12 hat=none
+%%OB mix cut=8000 lead=0.40 comp=0.28 bass=0.40 vol=1.0
+%%OB bass gain=0.38
+%%OB tape 0.10
+%%OB swing 0
+
+% 五声音阶旋律：D 大调里避开 C#，只走 D E F# A B。
+% K:D 会让 F 自动带升号，所以谱上写 f 就是 F#4。
+V:1 name="lead"
+"D" d2 e2 f4 a4 f4 | z2 e2 d4 z8 |
+"G" d4 g2 a2 g4 d4 | z4 g4 z8 |
+"A" e4 a2 b2 a4 e4 | z4 e4 z8 |
+"D" f4 a4 d'4 a4 | z4 f4 z8 |
+
+% 低音：每两小节「根音 → 三音」。每个三音都是半音级进到下一个根音（F#→G、B→A、C#→D）。
+V:2 name="bass" clef=bass
+D,,8 z8 | z8 F,,8 |
+G,,8 z8 | z8 B,,8 |
+A,,8 z8 | z8 ^C,8 |
+D,,8 z8 | z8 F,,8 |
