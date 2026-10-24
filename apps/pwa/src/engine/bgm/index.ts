@@ -8,7 +8,8 @@ export const bgm: BgmApi = createBgm();
 
 declare global {
   interface Window {
-    /* game.js / backing.js 是还没迁到 TS 的引擎文件，通过全局拿编曲数据 */
+    /* 调试用：控制台里 window.BGM.scoreOf(S.song) 能直接看编曲数据。
+       引擎内部一律走 import，不读这个全局。 */
     BGM?: BgmApi;
   }
 }

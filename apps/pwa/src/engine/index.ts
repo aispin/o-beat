@@ -1,14 +1,15 @@
 /* 引擎门面。
    ------------------------------------------------------------
-   底层三个脚本（sfx / scene / backing）是 IIFE，挂到 window 上；
-   game.js 是 canvas 与判定核心，纯 JS，不碰 React 也不碰 DOM 结构。
+   底层是三个各管一件事的模块：sfx（发声）、scene（画面）、
+   backing（伴奏排程），game 是玩法与判定核心。
    这里给 UI 一层显式类型，边界之外的类型安全由 TypeScript 负责。 */
 
-import './sfx.js';
-import './scene.js';
-import './backing.js';
+import { SFX } from './sfx';
+import { Scene } from './scene';
+import { Backing } from './backing';
 
 export { bgm } from './bgm';
+export { SFX, Scene, Backing };
 
 import {
   boot as bootEngine,
@@ -36,7 +37,7 @@ import {
   TIMBRES as TIMBRES_RAW,
   SCENES as SCENES_RAW,
   RHYTHM_STEP as RHYTHM_STEP_RAW,
-} from './game.js';
+} from './game';
 
 export type Mode = 'drummer' | 'melodist' | 'rhythm';
 export type Difficulty = 'casual' | 'normal' | 'strict';

@@ -5,6 +5,328 @@
    调整玩法只改 CFG / SONGS，不要动逻辑分支
    ============================================================ */
 
+import { SFX } from './sfx';
+import { Scene } from './scene';
+import { Backing } from './backing';
+import type { RhythmBar } from './backing';
+import { scoreOf } from './bgm/score';
+import type { DrumName, Voice } from './sfx';
+
+/* ---------------- 类型 ---------------- */
+
+type Mode = 'drummer' | 'melodist' | 'rhythm';
+type Difficulty = 'casual' | 'normal' | 'strict';
+type Phase = 'home' | 'playing' | 'paused' | 'result';
+type SceneId = 'cyber' | 'classic' | 'lofi' | 'rock' | 'pixel';
+type StyleId = 'straight' | 'swing' | 'bossa' | 'mathrock';
+type Scale = 'maj' | 'min';
+
+/** 音符所走的轨道 */
+type Track = 'drum' | 'mel' | 'pad' | 'rhythm';
+type NoteType = 'tap' | 'hold' | 'rest';
+type NoteStatus = 'pending' | 'holding' | 'done' | 'miss' | 'rest';
+
+/** 判定档位（能加分的三档） */
+type Grade = 'perfect' | 'great' | 'good';
+/** 含 miss 的完整判定结果 */
+type Judgement = Grade | 'miss';
+
+/** 按住中的长音槽位 */
+type HoldKey = 'pad' | 'rhythm';
+
+/** 一组判定窗口（秒） */
+interface Win {
+  perfect: number;
+  great: number;
+  good: number;
+}
+
+interface Style {
+  id: StyleId;
+  label: string;
+  cn: string;
+  scene: SceneId;
+  meter: [number, number];
+  bpm: number;
+  accent: number[];
+  divs: number[];
+  pool: number[];
+  motifs: number[][];
+}
+
+interface SceneDef {
+  label: string;
+  a: string;
+  b: string;
+  glow: string;
+}
+
+interface Theme {
+  a: string;
+  b: string;
+  rgb: number[];
+  rgbStr: string;
+  rgbBStr: string;
+}
+
+interface Song {
+  id: string;
+  name: string;
+  tag: string;
+  scene: SceneId;
+  bpm: number;
+  meter: number;
+  root: number;
+  scale: Scale;
+  chords: string[];
+  /** 拍号分母，只有节奏模式的虚拟曲目会带 */
+  den?: number;
+  /** 有固定编曲（谱面来自编曲旋律，而不是随机生成） */
+  arcade?: boolean;
+  /** 主奏音色 / 鼓组 / 空间，缺省时按场景取 */
+  inst?: string;
+  kit?: string;
+  space?: string;
+}
+
+interface Timbre {
+  id: string;
+  name: string;
+  ico: string;
+}
+
+/** 节奏模式的一小节 */
+interface Bar extends RhythmBar {
+  i: number;
+  bpm: number;
+  seg: number;
+  beats: number;
+  den: number;
+}
+
+interface Note {
+  id: number;
+  track: Track;
+  col: number;
+  time: number;
+  dur: number;
+  type: NoteType;
+  status: NoteStatus;
+  grade: Judgement | null;
+  /** 有谱曲目的绝对 MIDI 音高 */
+  midi?: number;
+  /** 节奏模式：属于第几小节 */
+  bar?: number;
+  /** 节奏模式：时值（拍） */
+  beats?: number;
+  dotted?: boolean;
+  trip?: number | null;
+  tie?: boolean;
+  heldFrom?: number;
+  heldRatio?: number;
+  pid?: number;
+  audio?: Voice | null;
+}
+
+/** 谱面 push() 收的草稿：id / status / grade 由 push 补 */
+type NoteDraft = Omit<Note, 'id' | 'status' | 'grade'> & {
+  id?: number;
+  status?: NoteStatus;
+  grade?: Judgement | null;
+};
+
+/** 一小节里的一个时值格 */
+interface Slot {
+  d: number;
+  rest: boolean;
+}
+
+type Random = () => number;
+
+interface Stats {
+  perfect: number;
+  great: number;
+  good: number;
+  miss: number;
+  pitch: number;
+  short: number;
+}
+
+interface Rect {
+  x: number;
+  w: number;
+}
+
+interface MelRect extends Rect {
+  colW: number;
+}
+
+interface Layout {
+  W: number;
+  H: number;
+  judgeY: number;
+  speed: number;
+  lane: Rect;
+  laneW: number;
+  top: number;
+  barGap: number;
+  pad: Rect | null;
+  mel: MelRect | null;
+}
+
+/** 命中特效：扩散环 / 飞散的点 */
+type Fx =
+  | { kind: 'ring'; x: number; y: number; t0: number; life: number; color: string }
+  | { kind: 'dot'; x: number; y: number; t0: number; life: number; color: string; vx: number; vy: number };
+
+/** 判定文字 */
+interface Float {
+  x: number;
+  y: number;
+  text: string;
+  color: string;
+  t0: number;
+  life: number;
+  size: number;
+}
+
+interface ResultRow {
+  k: string;
+  v: number;
+}
+
+interface HistogramCell {
+  h: number;
+  kind: 'early' | 'late' | 'zero';
+}
+
+interface Result {
+  grade: string;
+  sub: string;
+  score: number;
+  maxCombo: number;
+  rows: ResultRow[];
+  histo: HistogramCell[];
+  diag: string;
+  canSpeedUp: boolean;
+  nextBpm: number;
+}
+
+interface Settings {
+  lookahead: number;
+  offset: number;
+  padOn: boolean;
+  pitchJudge: boolean;
+  sound: boolean;
+  bgm: boolean;
+  sceneOn: boolean;
+  timbre: string;
+  style: StyleId;
+  bpm: number;
+}
+
+interface GameState {
+  phase: Phase;
+  mode: Mode;
+  song: Song;
+  pick: string;
+  diff: Difficulty;
+  style: StyleId;
+  bpmBase: number;
+  lastBpm: number;
+  bars: Bar[];
+  barNow: number;
+  notes: Note[];
+  layout: Layout;
+  startTime: number;
+  totalDur: number;
+  pausedAt: number;
+  score: number;
+  combo: number;
+  maxCombo: number;
+  earned: number;
+  stats: Stats;
+  devs: number[];
+  holds: Map<HoldKey, Note>;
+  rests: Note[];
+  restHits: number;
+  holdSum: number;
+  holdCount: number;
+  timbreStep: number;
+  rhythmRest: Note | null;
+  fx: Fx[];
+  floats: Float[];
+  press: Record<string, number>;
+  lastBeat: number;
+  beatPulse: number;
+  energy: number;
+  dim: number;
+  zoneAmt: number;
+  bgHue: number;
+  bgTarget: number;
+  /* 下面几个只在开局后才有值 */
+  countdown?: number;
+  hudBpm?: string;
+  result?: Result | null;
+}
+
+interface Snapshot {
+  phase: Phase;
+  mode: Mode;
+  diff: Difficulty;
+  style: StyleId;
+  pick: string;
+  song: Song;
+  songName: string;
+  songTag: string;
+  songBpm: number;
+  songMeter: number;
+  scene: SceneId;
+  sceneLabel: string;
+  sceneOn: boolean;
+  bpm: number;
+  styleBpm: number;
+  score: number;
+  combo: number;
+  comboSeq: number;
+  flashSeq: number;
+  bpmSeq: number;
+  hudBpm: string;
+  countdown: number;
+  result: Result | null;
+  timbre: string;
+  settings: Settings;
+}
+
+/** 击打音只需要这几个字段：整条 Note 或临时拼的 { track, col } 都能进 */
+interface HitRef {
+  track: Track;
+  col: number;
+  midi?: number | null;
+}
+
+declare global {
+  interface Window {
+    /** ?debug 时挂出来的引擎内部句柄 */
+    __OMB?: {
+      readonly S: GameState;
+      readonly settings: Settings;
+      holdJudge: () => boolean;
+      elapsed: () => number;
+      judgeRhythm: (t: number, pid: number) => void;
+      endRhythmHold: (t: number) => void;
+      endRun: () => void;
+      setMode: (mode: Mode) => void;
+      setDiff: (diff: Difficulty) => void;
+      setStyle: (id: StyleId) => void;
+      stepBpm: (delta: number) => void;
+      startRun: () => void;
+      press: (x: number, pointerId: number) => void;
+      release: (pointerId: number) => void;
+    };
+  }
+}
+
 const CFG = {
   layout: { judge: 0.78, spawn: -60, noteH: 20, radius: 10 },
   time: { countdownBeats: 4, defaultLookahead: 1.8 },
@@ -13,19 +335,19 @@ const CFG = {
     casual: [0.055, 0.100, 0.150],
     normal: [0.040, 0.075, 0.120],
     strict: [0.025, 0.050, 0.090],
-  },
-  score: { perfect: 100, great: 70, good: 40 },
+  } as Record<Difficulty, [number, number, number]>,
+  score: { perfect: 100, great: 70, good: 40 } as Record<Grade, number>,
   combo: { step: 10, bonus: 0.02, cap: 0.20 },
   zone: 50,
-  grade: [[0.95, 'S'], [0.88, 'A'], [0.78, 'B'], [0.65, 'C'], [0, 'D']],
+  grade: [[0.95, 'S'], [0.88, 'A'], [0.78, 'B'], [0.65, 'C'], [0, 'D']] as [number, string][],
 };
 
 const DRUM_COLOR = ['#5B8CFF', '#FF7A59', '#35D0BA', '#C084FC'];
 const MEL_COLOR = '#FFC94D';
-const GRADE_COLOR = { perfect: '#4ADE80', great: '#FFC94D', good: '#60A5FA', miss: '#4B5563' };
+const GRADE_COLOR: Record<Judgement, string> = { perfect: '#4ADE80', great: '#FFC94D', good: '#60A5FA', miss: '#4B5563' };
 
 /* 场景：一套 shader + 一套 UI 强调色，切歌时整体换肤 */
-const SCENES = {
+const SCENES: Record<SceneId, SceneDef> = {
   cyber:   { label: '赛博朋克', a: '#FF3FA4', b: '#35E0FF', glow: 'rgba(255,63,164,0.42)' },
   classic: { label: '音乐家的房间', a: '#FFB259', b: '#E0762F', glow: 'rgba(255,178,89,0.40)' },
   lofi:    { label: '慵懒房间', a: '#FFB066', b: '#7D9BC4', glow: 'rgba(255,176,102,0.36)' },
@@ -34,9 +356,9 @@ const SCENES = {
 };
 
 /* 当前主题：CSS 用变量，Canvas 用 rgb 三元组，两边必须同源 */
-const THEME = { a: '#35D0BA', b: '#5B8CFF', rgb: [53, 208, 186], rgbStr: '53,208,186', rgbBStr: '91,140,255' };
+const THEME: Theme = { a: '#35D0BA', b: '#5B8CFF', rgb: [53, 208, 186], rgbStr: '53,208,186', rgbBStr: '91,140,255' };
 
-function hexToRgb(hex) {
+function hexToRgb(hex: string): number[] {
   let h = String(hex).replace('#', '');
   if (h.length === 3) h = h.replace(/./g, '$&$&');
   const n = parseInt(h, 16);
@@ -44,12 +366,12 @@ function hexToRgb(hex) {
 }
 
 /* 在 RGB 基础上加透明度的便捷写法：ta = 主强调色，tb = 次强调色 */
-function ta(alpha) { return 'rgba(' + THEME.rgbStr + ',' + alpha + ')'; }
-function tb(alpha) { return 'rgba(' + THEME.rgbBStr + ',' + alpha + ')'; }
+function ta(alpha: number): string { return 'rgba(' + THEME.rgbStr + ',' + alpha + ')'; }
+function tb(alpha: number): string { return 'rgba(' + THEME.rgbBStr + ',' + alpha + ')'; }
 
 /* 节奏模式的「风格」：一种风格 = 一个拍号 + 一套重音轮廓 + 一批特征动机。
    BPM 由玩家调，风格只给缺省值和律动倾向。场景跟着风格换，切风格＝整套换肤。 */
-const STYLES = {
+const STYLES: Record<StyleId, Style> = {
   straight: {
     id: 'straight', label: 'Straight', cn: '直拍', scene: 'lofi',
     meter: [4, 4], bpm: 84,
@@ -83,17 +405,17 @@ const STYLES = {
     motifs: [[1.5, 1, 1], [1, 1.5, 1], [0.5, 0.5, 0.75, 0.75, 1]],
   },
 };
-const STYLE_ORDER = ['straight', 'swing', 'bossa', 'mathrock'];
+const STYLE_ORDER: StyleId[] = ['straight', 'swing', 'bossa', 'mathrock'];
 
 /* 一小节有多少个四分音符（7/8 → 3.5） */
-function barBeatsOf(st) { return st.meter[0] * 4 / st.meter[1]; }
+function barBeatsOf(st: Style): number { return st.meter[0] * 4 / st.meter[1]; }
 
 /* 节奏模式一局的长度：48 小节，每 16 小节 +10 BPM */
 const RHYTHM_BARS = 48;
 const RHYTHM_SEG = 16;
 const RHYTHM_STEP = 10;
 
-const SONGS = [
+const SONGS: Song[] = [
   /* 唯一一首「有谱」的曲子：编曲来自 bgm.js 那份 8bit 循环。
      旋律不预录，玩家打的每个音就是旋律本身。放在首位，也是缺省曲目。 */
   { id: 'arcade',name: '像素心跳', tag: '8bit · 方波', scene: 'pixel',   bpm: 132, meter: 4, root: 69, scale: 'min', chords: ['Am', 'F', 'C', 'G'],
@@ -106,16 +428,15 @@ const SONGS = [
   { id: 'live',  name: '地下现场', tag: '摇滚 · 强拍', scene: 'rock',    bpm: 88, meter: 4, root: 72, scale: 'maj', chords: ['C', 'F', 'G', 'Am'] },
 ];
 
-const NOTE_SEMI = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
 const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
-const PENTA = { maj: [0, 2, 4, 7, 9], min: [0, 3, 5, 7, 10] };
+const PENTA: Record<Scale, number[]> = { maj: [0, 2, 4, 7, 9], min: [0, 3, 5, 7, 10] };
 
 /* 场景 → 主奏音色 / 鼓组 */
-const SCENE_INST = { cyber: 'lead', classic: 'piano', lofi: 'rhodes', rock: 'guitar' };
-const SCENE_KIT = { cyber: 'techno', classic: 'acoustic', lofi: 'kpr77', rock: 'acoustic' };
+const SCENE_INST: Record<string, string> = { cyber: 'lead', classic: 'piano', lofi: 'rhodes', rock: 'guitar' };
+const SCENE_KIT: Record<string, string> = { cyber: 'techno', classic: 'acoustic', lofi: 'kpr77', rock: 'acoustic' };
 
 /* 纯节奏模式的搞怪音色 */
-const TIMBRES = [
+const TIMBRES: Timbre[] = [
   { id: 'wood',  name: '木鱼', ico: '<circle cx="8" cy="8.4" r="5.2"/><path d="M8 2.2v1.9"/>' },
   { id: 'bubble', name: '泡泡', ico: '<circle cx="7" cy="9" r="4.4"/><circle cx="12.6" cy="4.4" r="1.5"/>' },
   { id: 'boing', name: '弹簧', ico: '<path d="M3 12.4c1.6-5.4 3.4 2.4 5-2.4s3.2 2.4 4.6-1.6"/>' },
@@ -127,22 +448,22 @@ const TIMBRES = [
 ];
 
 /* ---------------- 工具 ---------------- */
-const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const clamp = (v: number, a: number, b: number): number => Math.min(b, Math.max(a, v));
 
-function mulberry32(a) {
-  return function () {
+function mulberry32(a: number): Random {
+  return function (): number {
     a |= 0; a = (a + 0x6D2B79F5) | 0;
     let t = Math.imul(a ^ (a >>> 15), 1 | a);
     t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
-function hashStr(s) {
+function hashStr(s: string): number {
   let h = 2166136261;
   for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
   return h >>> 0;
 }
-function roundRect(c, x, y, w, h, r) {
+function roundRect(c: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
   r = Math.min(r, w / 2, h / 2);
   c.beginPath();
   if (c.roundRect) { c.roundRect(x, y, w, h, r); return; }
@@ -153,18 +474,17 @@ function roundRect(c, x, y, w, h, r) {
   c.arcTo(x, y, x + w, y, r);
   c.closePath();
 }
-function chordSemis(name) {
-  const m = /^([A-G])(m?)$/.exec(name) || ['', 'C', ''];
-  const root = NOTE_SEMI[m[1]];
-  return m[2] === 'm' ? [root, root + 3, root + 7] : [root, root + 4, root + 7];
-}
 
 /* ---------------- 状态 ---------------- */
-let canvas = null;
-let ctx = null;
+
+/* canvas / ctx / layout 在 boot() 之前是空值，而所有读写都发生在 boot 之后
+   （绘制入口另有 `if (!L) return` 兜底）。类型上按「启动后必定存在」处理，
+   免得把非空断言撒满整个绘制层。 */
+let canvas: HTMLCanvasElement = null as unknown as HTMLCanvasElement;
+let ctx: CanvasRenderingContext2D = null as unknown as CanvasRenderingContext2D;
 const view = { w: 0, h: 0, dpr: 1 };
 
-const S = {
+const S: GameState = {
   phase: 'home',
   mode: 'drummer',
   song: SONGS[0],
@@ -176,7 +496,7 @@ const S = {
   bars: [],
   barNow: 0,
   notes: [],
-  layout: null,
+  layout: null as unknown as Layout,
   startTime: 0,
   totalDur: 0,
   pausedAt: 0,
@@ -208,18 +528,18 @@ const S = {
 /* 读设置。必须整段包住：iOS 关掉「跨站跟踪」、Safari 无痕、部分 App 内置浏览器
    都会让 localStorage 一碰就抛 SecurityError。这是模块顶层代码，一抛整个包都进不来，
    页面就是一片黑 —— 所以这里绝不能让异常漏出去。 */
-function loadSettings() {
+function loadSettings(): Partial<Settings> {
   try {
     const raw = localStorage.getItem('omb.settings');
     if (!raw) return {};
-    const v = JSON.parse(raw);
-    return v && typeof v === 'object' ? v : {};
-  } catch (e) {
+    const v: unknown = JSON.parse(raw);
+    return v && typeof v === 'object' ? (v as Partial<Settings>) : {};
+  } catch {
     return {};
   }
 }
 
-const settings = Object.assign({
+const settings: Settings = Object.assign({
   lookahead: CFG.time.defaultLookahead,
   offset: 0,
   padOn: true,
@@ -236,7 +556,7 @@ const settings = Object.assign({
 // 否则「加快速度继续」把上一轮的 174 存住了，第二天打开就是一场打不动的局。
 settings.bpm = 0;
 
-const DIFF_NOTE = {
+const DIFF_NOTE: Record<Mode, Record<Difficulty, string>> = {
   drummer: {
     casual: '只有正拍，四分音符为主',
     normal: '正反拍都有，判定标准',
@@ -255,8 +575,8 @@ const DIFF_NOTE = {
 };
 
 /* 设置落盘：只在用户真的改了东西时写，读在模块初始化那一次 */
-function persist() {
-  try { localStorage.setItem('omb.settings', JSON.stringify(settings)); } catch (e) { /* 隐私模式 */ }
+function persist(): void {
+  try { localStorage.setItem('omb.settings', JSON.stringify(settings)); } catch { /* 隐私模式 */ }
 }
 
 /* ============================================================
@@ -264,10 +584,10 @@ function persist() {
    发声在 sfx.js（采样 + 物理建模 + 混响），编曲在 backing.js
    ============================================================ */
 const AudioEng = {
-  get ctx() { return window.SFX ? SFX.ctx : null; },
+  get ctx(): AudioContext | null { return SFX.ctx; },
 
-  init() {
-    if (!window.SFX || !SFX.init()) return false;
+  init(): boolean {
+    if (!SFX.init()) return false;
     const space = S.mode === 'rhythm' ? 'practice' : (S.song.space || S.song.scene);
     SFX.setSpace(space);
     SFX.setKit(S.song.kit || SCENE_KIT[S.song.scene] || 'acoustic');
@@ -276,19 +596,19 @@ const AudioEng = {
     return true;
   },
 
-  now() { return window.SFX ? SFX.now() : performance.now() / 1000; },
-  setMute(m) { if (window.SFX) SFX.setMute(m); },
-  click(t, accent) { if (window.SFX) SFX.click(t, accent); },
+  now(): number { return SFX.now(); },
+  setMute(m: boolean): void { SFX.setMute(m); },
+  click(t: number, accent: boolean): void { SFX.click(t, accent); },
 
   /* 击打音：按模式分发 */
-  playHit(note) {
-    if (!window.SFX || !settings.sound) return null;
+  playHit(note: HitRef): Voice | null {
+    if (!settings.sound) return null;
     const t = this.now();
 
     if (S.mode === 'rhythm') { playTimbre(t, 1); return null; }
 
     if (note.track === 'drum') {
-      const names = ['kick', 'snare', 'hat', 'openhat'];
+      const names: DrumName[] = ['kick', 'snare', 'hat', 'openhat'];
       SFX.drum(names[note.col] || 'kick', t, { gain: note.col === 0 ? 1 : 0.82 });
       return null;
     }
@@ -308,8 +628,8 @@ const AudioEng = {
 
 /* 节奏模式的搞怪音色：按五声音阶轮流换音高，连打会变成一小段旋律 */
 const TIMBRE_LADDER = [0, 2, 4, 7, 9, 12, 9, 7, 4, 2, 0, 4];
-function playTimbre(t, vol) {
-  if (!window.SFX || !settings.sound) return;
+function playTimbre(t: number, vol?: number): void {
+  if (!settings.sound) return;
   const semi = TIMBRE_LADDER[S.timbreStep % TIMBRE_LADDER.length];
   S.timbreStep++;
   SFX.sfx(settings.timbre || 'wood', t, {
@@ -322,7 +642,7 @@ function playTimbre(t, vol) {
 /* ============================================================
    谱面
    ============================================================ */
-function sectionOf(bar) {
+function sectionOf(bar: number): number {
   if (bar < 4) return 0;
   if (bar < 8) return 1;
   if (bar < 12) return 2;
@@ -332,18 +652,18 @@ function sectionOf(bar) {
 /* 鼓手模式的有谱谱面：打的就是编曲那套鼓 —— 底鼓 1/4/4&、军鼓 2/4。
    位置和 backing.js 里 buildArcade 排的事件一一对应，所以敲下去
    跟伴奏是同一个点，不会有"打到空处"的错位感。 */
-function buildArcadeDrumChart(song) {
+function buildArcadeDrumChart(song: Song): Note[] {
   const beat = 60 / song.bpm;
   const sixteenth = beat / 4;
   const barDur = beat * song.meter;
-  const notes = [];
+  const notes: Note[] = [];
   let id = 0;
-  const push = (n) => { n.id = id++; n.status = 'pending'; n.grade = null; notes.push(n); };
+  const push = (n: NoteDraft): void => { n.id = id++; n.status = 'pending'; n.grade = null; notes.push(n as Note); };
 
   const K = 0, SN = 1, CH = 2;
   for (let bar = 0; bar < CFG.bars; bar++) {
     const t0 = bar * barDur;
-    const add = (s, lane) => push({
+    const add = (s: number, lane: number): void => push({
       track: 'drum', col: lane, time: t0 + s * sixteenth, dur: 0, type: 'tap',
     });
 
@@ -367,7 +687,7 @@ function buildArcadeDrumChart(song) {
   return notes;
 }
 
-function buildChart() {
+function buildChart(): Note[] {
   S.rests = [];
   if (S.mode === 'rhythm') return buildRhythmChart();
   const song = S.song;
@@ -381,9 +701,9 @@ function buildChart() {
   const seed = hashStr(song.id) + ({ casual: 11, normal: 23, strict: 37 }[S.diff]) * 7919;
   const rnd = mulberry32(seed);
 
-  const notes = [];
+  const notes: Note[] = [];
   let id = 0;
-  const push = (n) => { n.id = id++; n.status = 'pending'; n.grade = null; notes.push(n); };
+  const push = (n: NoteDraft): void => { n.id = id++; n.status = 'pending'; n.grade = null; notes.push(n as Note); };
 
   let prevCol = 2;
 
@@ -393,7 +713,7 @@ function buildChart() {
 
     if (S.mode === 'drummer') {
       const K = 0, SN = 1, CH = 2, OH = 3;
-      const add = (b, lane) => push({ track: 'drum', col: lane, time: t0 + b * beat, dur: 0, type: 'tap' });
+      const add = (b: number, lane: number): void => push({ track: 'drum', col: lane, time: t0 + b * beat, dur: 0, type: 'tap' });
 
       add(0, K);
       for (let b = 1; b < meter; b++) {
@@ -445,33 +765,34 @@ function buildChart() {
 /* ============================================================
    有谱曲目的谱面
    ------------------------------------------------------------
-   音符直接来自编曲里的旋律行（bgm.js 的 MEL）：偶数十六分位上有音，
+   音符直接来自编曲里的旋律行（bgm/compose.ts 的 lead）：偶数十六分位上有音，
    每小节最多 6 个。难度只决定「取几个」和「补不补加花」，不改音高 ——
    所以三档弹的都是同一段旋律，区别只在密度和判定窗口。
 
    列的排法用「本小节内音高的相对位置」：低的在左、高的在右。
    这样不用看音名也能感觉到旋律在往上还是往下走。
    ============================================================ */
-function buildArcadeChart(song) {
-  const sc = window.BGM && window.BGM.scoreOf(song);
+
+function buildArcadeChart(song: Song): Note[] {
+  const sc = scoreOf(song);
   if (!sc) return [];
 
   const beat = 60 / song.bpm;
   const sixteenth = beat / 4;
   const barDur = beat * song.meter;
-  const notes = [];
+  const notes: Note[] = [];
   let id = 0;
-  const push = (n) => { n.id = id++; n.status = 'pending'; n.grade = null; notes.push(n); };
+  const push = (n: NoteDraft): void => { n.id = id++; n.status = 'pending'; n.grade = null; notes.push(n as Note); };
 
   for (let bar = 0; bar < CFG.bars; bar++) {
     const src = bar % sc.bars;
-    const row = sc.mel[src];
+    const row = sc.lead[src];
     const t0 = bar * barDur;
 
-    const pitches = row.filter((m) => m != null);
+    const pitches = row.filter((m): m is number => m != null);
     const lo = Math.min.apply(null, pitches);
     const hi = Math.max.apply(null, pitches);
-    const colOf = (m) => (hi === lo ? 2 : clamp(Math.round(((m - lo) / (hi - lo)) * 4), 0, 4));
+    const colOf = (m: number): number => (hi === lo ? 2 : clamp(Math.round(((m - lo) / (hi - lo)) * 4), 0, 4));
 
     for (let s = 0; s < 16; s++) {
       const m = row[s];
@@ -507,7 +828,6 @@ function buildArcadeChart(song) {
    一段彩色接一段灰。附点、延音线、三连音都直接体现在长度上。
    每局随机生成。
    ============================================================ */
-const DUR_LABEL = { 4: '全', 3: '附点二分', 2: '二分', 1.5: '附点四分', 1: '四分', 0.75: '附点八分', 0.5: '八分', 0.25: '十六分' };
 
 /* 一屏装下多少个小节。2.15 ≈ 看到两个完整格子 + 第三个刚冒头，
    让"上一小节 / 这一小节 / 下一小节"能同时入眼，小节感才立得住。 */
@@ -516,8 +836,8 @@ const BAR_LOOK = 2.15;
 /* 松手时值判定：只有挑战档才判"有没有按满"。
    入门/熟练只判落点 —— 时值本身已经靠"块的长度"在教，再叠加手部计时
    会把练习变成罚站。 */
-const HOLD_JUDGE = { casual: false, normal: false, strict: true };
-function holdJudge() { return !!HOLD_JUDGE[S.diff]; }
+const HOLD_JUDGE: Record<Difficulty, boolean> = { casual: false, normal: false, strict: true };
+function holdJudge(): boolean { return !!HOLD_JUDGE[S.diff]; }
 
 /* 时值块之间留的缝。太小就糊成一条色带，小节里"有几个音"看不出来。 */
 const NOTE_GAP = 6;
@@ -525,11 +845,11 @@ const NOTE_GAP = 6;
 /* 一小节等分：easy 的核心规则 —— 每小节所有音时值完全一样。
    全音符 / 2 个二分 / 3 个三连音 / 4 个四分 / 5 个五连 / 6 个六连，
    都只是"这一小节切成 N 份"的不同 N。 */
-function uniformBar(st, barBeats, rnd) {
+function uniformBar(st: Style, barBeats: number, rnd: Random): Slot[] {
   const divs = st.divs.filter((n) => barBeats / n >= 0.26);   // 别切出敲不动的碎片
   const N = divs[Math.floor(rnd() * divs.length)] || 1;
   const d = barBeats / N;
-  const slots = [];
+  const slots: Slot[] = [];
   for (let i = 0; i < N; i++) slots.push({ d, rest: false });
   return slots;
 }
@@ -539,13 +859,13 @@ function uniformBar(st, barBeats, rnd) {
    再切一次就是 0.44，玩家根本没法从长度上认出那是什么音符。 */
 const DUR_SET = [4, 3, 2, 1.5, 1, 0.75, 0.5, 0.25];
 const EPS = 1e-6;
-const near = (a, b) => Math.abs(a - b) < EPS;
+const near = (a: number, b: number): boolean => Math.abs(a - b) < EPS;
 
 /* 把一个时值拆成 2~3 个"有名字"的时值。0.75 + 0.25 就是附点组合，
    所以"加入附点"和"串入其他时值"在实现上是同一件事。 */
-function splitSpan(span, rnd, strict) {
+function splitSpan(span: number, rnd: Random, strict: boolean): number[] | null {
   const minD = 0.24;
-  const out = [];
+  const out: number[][] = [];
 
   for (let i = 0; i < DUR_SET.length; i++) {
     const a = DUR_SET[i];
@@ -573,7 +893,7 @@ function splitSpan(span, rnd, strict) {
 
 /* 熟练 / 挑战：先按等分铺底，再随机把几个音换成别的时值组合。
    有一定概率直接套一条风格动机 —— 那是"往风格靠"最直接的来源。 */
-function mixedBar(st, barBeats, rnd) {
+function mixedBar(st: Style, barBeats: number, rnd: Random): Slot[] {
   const strict = S.diff === 'strict';
 
   if (rnd() < (strict ? 0.4 : 0.34)) {
@@ -589,12 +909,12 @@ function mixedBar(st, barBeats, rnd) {
     return near(d, barBeats) || (d >= 0.5 - EPS && DUR_SET.some((x) => near(x, d)));
   });
   const N = coarse[Math.floor(rnd() * coarse.length)] || 1;
-  const slots = [];
+  const slots: Slot[] = [];
   for (let i = 0; i < N; i++) slots.push({ d: barBeats / N, rest: false });
 
   const edits = strict ? 2 + Math.floor(rnd() * 2) : 1 + Math.floor(rnd() * 2);
   for (let k = 0; k < edits; k++) {
-    const idx = [];
+    const idx: number[] = [];
     slots.forEach((s, i) => { if (s.d >= 0.5 - EPS) idx.push(i); });
     if (!idx.length) break;
     const i = idx[Math.floor(rnd() * idx.length)];
@@ -605,7 +925,7 @@ function mixedBar(st, barBeats, rnd) {
 }
 
 /* 休止：入门档上限 = 音符数的一半，且不连续；熟练以上只保证不连续 */
-function placeRests(slots, rnd, cap, prob = 0.22) {
+function placeRests(slots: Slot[], rnd: Random, cap: number | null, prob = 0.22): void {
   let placed = 0, run = 0;
   for (let i = 0; i < slots.length; i++) {
     if (cap != null && placed >= cap) break;
@@ -616,7 +936,7 @@ function placeRests(slots, rnd, cap, prob = 0.22) {
   if (slots.every((s) => s.rest)) slots[0].rest = false;
 }
 
-function genBar(st, barBeats, rnd) {
+function genBar(st: Style, barBeats: number, rnd: Random): Slot[] {
   const casual = S.diff === 'casual';
   const slots = casual ? uniformBar(st, barBeats, rnd) : mixedBar(st, barBeats, rnd);
 
@@ -634,18 +954,23 @@ function genBar(st, barBeats, rnd) {
   return slots;
 }
 
-function buildRhythmChart() {
+function buildRhythmChart(): Note[] {
   const st = STYLES[S.style] || STYLES.straight;
   const barBeats = barBeatsOf(st);
   // 每局都不一样：用时间 + 随机数做种子
   const seed = ((Date.now() ^ Math.floor(Math.random() * 1e9)) >>> 0) || 7;
   const rnd = mulberry32(seed);
 
-  const notes = [];
-  const rests = [];
-  const bars = [];
+  const notes: Note[] = [];
+  const rests: Note[] = [];
+  const bars: Bar[] = [];
   let id = 0;
-  const push = (n) => { n.id = id++; notes.push(n); };
+  const push = (n: NoteDraft): Note => {
+    n.id = id++;
+    const note = n as Note;
+    notes.push(note);
+    return note;
+  };
 
   // 时间轴：48 小节，每 16 小节 +10 BPM。速度一变，小节在屏幕上也变矮，
   // 所以每小节自带 dur，绘制一律按各自的小节时长换算。
@@ -666,21 +991,22 @@ function buildRhythmChart() {
     let pos = 0;
     slots.forEach((s) => {
       const common = {
-        track: 'rhythm', col: 0, bar: bar.i,
+        track: 'rhythm' as Track, col: 0, bar: bar.i,
         time: bar.t + pos * beatSec,
         dur: s.d * beatSec,
         beats: s.d,
       };
       if (s.rest) {
-        const r = Object.assign({}, common, { type: 'rest', status: 'rest' });
-        push(r); rests.push(r);
+        const r = push({ ...common, type: 'rest', status: 'rest' });
+        rests.push(r);
       } else {
-        push(Object.assign({}, common, {
+        push({
+          ...common,
           type: s.d >= 1 - 1e-6 ? 'hold' : 'tap',
           dotted: [3, 1.5, 0.75].some((x) => Math.abs(x - s.d) < 1e-6),
           trip: null,
           status: 'pending', grade: null,
-        }));
+        });
       }
       pos += s.d;
     });
@@ -695,16 +1021,16 @@ function buildRhythmChart() {
 /* ============================================================
    布局
    ============================================================ */
-function curStyle() { return STYLES[S.style] || STYLES.straight; }
-function curBpm() { return settings.bpm > 0 ? settings.bpm : curStyle().bpm; }
+function curStyle(): Style { return STYLES[S.style] || STYLES.straight; }
+function curBpm(): number { return settings.bpm > 0 ? settings.bpm : curStyle().bpm; }
 
 /* 第一小节的时长：整局的滚动速度由它定，后面 BPM 变高只会让格子变矮 */
-function rhythmFirstBarDur() {
+function rhythmFirstBarDur(): number {
   if (S.bars && S.bars.length) return S.bars[0].dur;
   return barBeatsOf(curStyle()) * (60 / curBpm());
 }
 
-function computeLayout() {
+function computeLayout(): void {
   const W = view.w, H = view.h;
   const judgeY = H * CFG.layout.judge;
   // 节奏模式按小节定速：一屏正好看到约 2 个小节格子。
@@ -717,7 +1043,7 @@ function computeLayout() {
   } else {
     speed = (judgeY - CFG.layout.spawn) / settings.lookahead;
   }
-  const L = { W, H, judgeY, speed };
+  const L = { W, H, judgeY, speed } as Layout;
 
   if (S.mode === 'rhythm') {
     const w = Math.min(W - 32, 430);
@@ -743,7 +1069,7 @@ function computeLayout() {
   S.layout = L;
 }
 
-function noteGeom(n) {
+function noteGeom(n: { track: Track; col: number }): { cx: number; w: number } {
   const L = S.layout;
   if (n.track === 'rhythm') {
     // 左右各留 30px 槽边：块比格子窄一圈，格子轮廓才看得出来；
@@ -754,12 +1080,12 @@ function noteGeom(n) {
     return { cx: L.laneW * (n.col + 0.5), w: Math.min(L.laneW - 12, 52) };
   }
   if (n.track === 'pad') {
-    return { cx: L.pad.x + L.pad.w / 2, w: Math.min(L.pad.w - 24, 62) };
+    return { cx: L.pad!.x + L.pad!.w / 2, w: Math.min(L.pad!.w - 24, 62) };
   }
-  return { cx: L.mel.x + L.mel.colW * (n.col + 0.5), w: Math.min(L.mel.colW - 9, 46) };
+  return { cx: L.mel!.x + L.mel!.colW * (n.col + 0.5), w: Math.min(L.mel!.colW - 9, 46) };
 }
 
-function noteColor(n) {
+function noteColor(n: { track: Track; type: NoteType; col: number }): string {
   if (n.track === 'rhythm') return n.type === 'rest' ? '#8C94A6' : THEME.a;
   if (n.track === 'drum') return DRUM_COLOR[n.col];
   if (n.track === 'pad') return THEME.b;
@@ -769,7 +1095,7 @@ function noteColor(n) {
 /* ============================================================
    渲染
    ============================================================ */
-function resize() {
+function resize(): void {
   const dpr = Math.min(window.devicePixelRatio || 1, 2.5);
   view.w = window.innerWidth;
   view.h = window.innerHeight;
@@ -779,11 +1105,11 @@ function resize() {
   canvas.style.width = view.w + 'px';
   canvas.style.height = view.h + 'px';
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  if (window.Scene) Scene.resize();
+  Scene.resize();
   computeLayout();
 }
 
-function drawLanes() {
+function drawLanes(): void {
   const L = S.layout, c = ctx, H = L.H;
 
   c.save();
@@ -858,7 +1184,7 @@ function drawLanes() {
   c.restore();
 }
 
-function hexA(hex, a) {
+function hexA(hex: string, a: number): string {
   const n = parseInt(hex.slice(1), 16);
   return 'rgba(' + ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ',' + a + ')';
 }
@@ -871,7 +1197,7 @@ function hexA(hex, a) {
    感知到的唯一办法。格子里再按时值切成长短不一的块，于是
    「一小节里塞了几个音」和「每个音多长」能同时读出来。
    没有格子的连续色带，看起来永远是一条会动的胶带，没有节。 */
-function drawRhythmLane() {
+function drawRhythmLane(): void {
   const L = S.layout, c = ctx;
   const x = L.lane.x, w = L.lane.w;
   const top = L.top;
@@ -898,9 +1224,9 @@ function drawRhythmLane() {
 /* 当前可见的小节：y 与高度都按各自的小节时长算。
    BPM 每 16 小节升一档，同一小节占的秒数变少 → 格子变矮，
    所以不能再用一个全局 barH。 */
-function visibleBars(t) {
+function visibleBars(t: number): { b: Bar; bottom: number; y0: number; h: number }[] {
   const L = S.layout;
-  const out = [];
+  const out: { b: Bar; bottom: number; y0: number; h: number }[] = [];
   const bars = S.bars;
   if (!bars || !bars.length) return out;
   for (let i = 0; i < bars.length; i++) {
@@ -916,7 +1242,7 @@ function visibleBars(t) {
 }
 
 /* 单个小节格子：底、描边、拍刻度 */
-function drawRhythmBar(b, y0, h, t) {
+function drawRhythmBar(b: Bar, y0: number, h: number, t: number): void {
   const L = S.layout, c = ctx;
   const x = L.lane.x, w = L.lane.w;
   const beatN = b.ticks || 4;
@@ -953,7 +1279,7 @@ function drawRhythmBar(b, y0, h, t) {
 /* 小节线 + 小节号，最后绘制。
    缝隙只有 4px，光靠留白分不出小节，所以每个分界补一条贯穿轨道的小节线；
    块几乎占满格子，小节点必须先画就可能被盖住，必须走这一遍。 */
-function drawRhythmBarMarks() {
+function drawRhythmBarMarks(): void {
   const L = S.layout, c = ctx;
   const t = Math.max(0, elapsed());
   const x = L.lane.x, w = L.lane.w;
@@ -993,7 +1319,7 @@ function drawRhythmBarMarks() {
 }
 
 /* 卷帘顶部的渐隐：长音符从暗处浮出，而不是被生硬切断 */
-function drawRhythmFade() {
+function drawRhythmFade(): void {
   const L = S.layout, c = ctx;
   const top = L.top, h = 54;
   const g = c.createLinearGradient(0, top, 0, top + h);
@@ -1008,7 +1334,7 @@ function drawRhythmFade() {
   c.restore();
 }
 
-function drawRhythmPad() {
+function drawRhythmPad(): void {
   const L = S.layout, c = ctx;
   const pad = { x: L.lane.x, w: L.lane.w, y: L.judgeY + 14, h: Math.max(72, L.H - L.judgeY - 40) };
   const press = S.press.rhythm || 0;
@@ -1066,10 +1392,10 @@ function drawRhythmPad() {
   c.restore();
 }
 
-function drawRhythmNote(n, t) {
+function drawRhythmNote(n: Note, t: number): void {
   const L = S.layout, c = ctx;
   const g = noteGeom(n);
-  const bar = S.bars[n.bar];
+  const bar = S.bars[n.bar as number];
   if (!bar) return;
   const barBottom = L.judgeY - (bar.t - t) * L.speed;
   // 块不完全按 dur×speed 算，而是按"在这一小节里占几成"换算 ——
@@ -1077,7 +1403,7 @@ function drawRhythmNote(n, t) {
   const p0 = clamp((n.time - bar.t) / bar.dur, 0, 1);
   const p1 = clamp((n.time + n.dur - bar.t) / bar.dur, 0, 1);
   const inner = bar.dur * L.speed - L.barGap;
-  const yOf = (p) => barBottom - L.barGap / 2 - p * inner;
+  const yOf = (p: number): number => barBottom - L.barGap / 2 - p * inner;
 
   const bottom = yOf(p0);
   const top = yOf(p1) + NOTE_GAP;   // 相邻两块之间永远有一条缝
@@ -1127,7 +1453,7 @@ function drawRhythmNote(n, t) {
       c.font = '600 11px -apple-system, sans-serif';
       c.textAlign = 'center';
       c.textBaseline = 'middle';
-      c.fillText('休止 ' + fmtBeats(n.beats), g.cx, top + h / 2);
+      c.fillText('休止 ' + fmtBeats(n.beats as number), g.cx, top + h / 2);
     }
     c.restore();
     return;
@@ -1185,7 +1511,7 @@ function drawRhythmNote(n, t) {
     c.font = '700 10px -apple-system, sans-serif';
     c.textAlign = 'left';
     c.textBaseline = 'bottom';
-    c.fillText(fmtBeats(n.beats) + '拍' + (n.dotted ? '·' : ''), x + 10, bottom - hh - 5);
+    c.fillText(fmtBeats(n.beats as number) + '拍' + (n.dotted ? '·' : ''), x + 10, bottom - hh - 5);
   }
 
   // 三连音标记
@@ -1224,18 +1550,18 @@ function drawRhythmNote(n, t) {
 
 /* 时值标签：全用乐谱上的分数写法。
    「1.33 拍」这种读数没人看得懂，能写成 1⅓ 就写成 1⅓。 */
-const BEAT_LABEL = [
+const BEAT_LABEL: [number, string][] = [
   [4, '4'], [3.5, '3½'], [3, '3'], [8 / 3, '2⅔'], [2, '2'], [1.5, '1½'],
   [4 / 3, '1⅓'], [1, '1'], [0.8, '⅘'], [0.75, '¾'], [2 / 3, '⅔'], [0.5, '½'], [0.25, '¼'],
 ];
-function fmtBeats(b) {
+function fmtBeats(b: number): string {
   for (let i = 0; i < BEAT_LABEL.length; i++) {
     if (Math.abs(b - BEAT_LABEL[i][0]) < 1e-6) return BEAT_LABEL[i][1];
   }
   return String(Math.round(b * 100) / 100);
 }
 
-function drawHitZone() {
+function drawHitZone(): void {
   const L = S.layout, c = ctx;
   if (S.mode === 'rhythm') {
     drawRhythmPad();
@@ -1262,7 +1588,7 @@ function drawHitZone() {
   });
 }
 
-function drawJudgeLine() {
+function drawJudgeLine(): void {
   const L = S.layout, c = ctx;
   const pulse = S.beatPulse;
   const rhythm = S.mode === 'rhythm';
@@ -1303,7 +1629,7 @@ function drawJudgeLine() {
   }
 }
 
-function drawNote(n, t) {
+function drawNote(n: Note, t: number): void {
   const L = S.layout, c = ctx;
   const g = noteGeom(n);
   const y = L.judgeY - (n.time - t) * L.speed;
@@ -1365,7 +1691,7 @@ function drawNote(n, t) {
   }
 }
 
-function drawNotes(t) {
+function drawNotes(t: number): void {
   const L = S.layout;
   const horizon = (L.judgeY - CFG.layout.spawn) / L.speed + 0.5;
   const rhythm = S.mode === 'rhythm';
@@ -1381,7 +1707,7 @@ function drawNotes(t) {
   }
 }
 
-function drawFx(now) {
+function drawFx(now: number): void {
   const c = ctx;
   for (let i = S.fx.length - 1; i >= 0; i--) {
     const f = S.fx[i];
@@ -1406,7 +1732,7 @@ function drawFx(now) {
   }
 }
 
-function drawFloats(now) {
+function drawFloats(now: number): void {
   const c = ctx;
   for (let i = S.floats.length - 1; i >= 0; i--) {
     const f = S.floats[i];
@@ -1422,7 +1748,7 @@ function drawFloats(now) {
   }
 }
 
-function draw() {
+function draw(): void {
   const L = S.layout;
   if (!L) return;
   const t = elapsed();
@@ -1445,17 +1771,17 @@ function draw() {
 /* ============================================================
    时间与判定
    ============================================================ */
-function elapsed() {
+function elapsed(): number {
   if (S.phase === 'home') return 0;
   return AudioEng.now() - S.startTime - settings.offset / 1000;
 }
 
-function win() {
+function win(): Win {
   const w = CFG.windows[S.diff];
   return { perfect: w[0], great: w[1], good: w[2] };
 }
 
-function gradeOf(dt) {
+function gradeOf(dt: number): Grade | null {
   const w = win();
   const a = Math.abs(dt);
   if (a <= w.perfect) return 'perfect';
@@ -1464,11 +1790,11 @@ function gradeOf(dt) {
   return null;
 }
 
-function comboMult() {
+function comboMult(): number {
   return 1 + Math.min(CFG.combo.cap, Math.floor(S.combo / CFG.combo.step) * CFG.combo.bonus);
 }
 
-function addScore(base, x, y, grade) {
+function addScore(base: number, x: number, y: number, grade: Judgement): void {
   const gain = Math.round(base * comboMult());
   S.score += gain;
   S.earned += base;
@@ -1500,13 +1826,13 @@ function addScore(base, x, y, grade) {
   }
 }
 
-function updateComboUI() {
+function updateComboUI(): void {
   // 连击数字与打击闪光交给 UI：重新挂载 = 重放动画，比手动改 style 干净
   bumpCombo();
   emit();
 }
 
-function handleHit(x, pid) {
+function handleHit(x: number, pid: number): void {
   const L = S.layout;
   const t = elapsed();
   if (S.mode === 'rhythm') {
@@ -1517,7 +1843,7 @@ function handleHit(x, pid) {
     judgeDrum(lane, t);
   } else {
     if (L.pad && x < L.pad.w) { startHold(t, pid); return; }
-    const col = clamp(Math.floor((x - L.mel.x) / L.mel.colW), 0, 4);
+    const col = clamp(Math.floor((x - L.mel!.x) / L.mel!.colW), 0, 4);
     judgeMel(col, t);
   }
 }
@@ -1525,7 +1851,7 @@ function handleHit(x, pid) {
 /* ---------------- 纯节奏模式判定 ---------------- */
 // 起音判时间，长音符再判松手；休止符内敲击算抢拍（只断连击，不扣分）
 
-function activeRest(t) {
+function activeRest(t: number): Note | null {
   for (let i = 0; i < S.rests.length; i++) {
     const r = S.rests[i];
     if (t >= r.time && t < r.time + r.dur) return r;
@@ -1534,9 +1860,9 @@ function activeRest(t) {
   return null;
 }
 
-function judgeRhythm(t, pid) {
+function judgeRhythm(t: number, pid: number): void {
   const w = win();
-  let best = null, bd = 1e9;
+  let best: Note | null = null, bd = 1e9;
   for (let i = 0; i < S.notes.length; i++) {
     const n = S.notes[i];
     if (n.track !== 'rhythm' || n.type === 'rest' || n.status !== 'pending') continue;
@@ -1545,7 +1871,7 @@ function judgeRhythm(t, pid) {
     if (n.time - t > w.good) break;
   }
 
-  const geom = (n) => ({
+  const geom = (n: Note): { x: number; y: number; n: Note } => ({
     x: S.layout.lane.x + S.layout.lane.w / 2,
     y: S.layout.judgeY,
     n,
@@ -1589,7 +1915,7 @@ function judgeRhythm(t, pid) {
     S.combo = 0;
     updateComboUI();
     S.press.rhythm = 1;
-    if (window.SFX) SFX.sfx('buzz', AudioEng.now(), { gain: 0.5 });
+    SFX.sfx('buzz', AudioEng.now(), { gain: 0.5 });
     S.floats.push({
       x: S.layout.lane.x + S.layout.lane.w / 2, y: S.layout.judgeY - 40,
       text: '休止', color: '#8C94A6', t0: AudioEng.now(), life: 0.5, size: 13,
@@ -1602,7 +1928,7 @@ function judgeRhythm(t, pid) {
   playTimbre(AudioEng.now(), 0.4);
 }
 
-function endRhythmHold(t) {
+function endRhythmHold(t: number): void {
   const n = S.holds.get('rhythm');
   if (!n) return;
   S.holds.delete('rhythm');
@@ -1618,7 +1944,7 @@ function endRhythmHold(t) {
   S.holdCount++;
   if (!ok) S.stats.short++;
 
-  const base = CFG.score[n.grade] * 0.4 * (ok ? 1 : ratio);
+  const base = CFG.score[n.grade as Grade] * 0.4 * (ok ? 1 : ratio);
   S.score += Math.round(base);
   S.earned += base;
   emit();
@@ -1632,9 +1958,9 @@ function endRhythmHold(t) {
   }
 }
 
-function judgeDrum(lane, t) {
+function judgeDrum(lane: number, t: number): void {
   const w = win();
-  let best = null, bd = 1e9;
+  let best: Note | null = null, bd = 1e9;
   for (let i = 0; i < S.notes.length; i++) {
     const n = S.notes[i];
     if (n.track !== 'drum' || n.col !== lane || n.status !== 'pending') continue;
@@ -1657,9 +1983,14 @@ function judgeDrum(lane, t) {
   }
 }
 
-function nearestMel(t, col, useCol) {
+function nearestMel(t: number, col: number, useCol: boolean): {
+  best: Note | null;
+  bd: number;
+  anyBest: Note | null;
+  anyBd: number;
+} {
   const w = win();
-  let best = null, bd = 1e9, anyBest = null, anyBd = 1e9;
+  let best: Note | null = null, bd = 1e9, anyBest: Note | null = null, anyBd = 1e9;
   for (let i = 0; i < S.notes.length; i++) {
     const n = S.notes[i];
     if (n.track !== 'mel' || n.status !== 'pending') continue;
@@ -1672,11 +2003,11 @@ function nearestMel(t, col, useCol) {
   return { best, bd, anyBest, anyBd };
 }
 
-function judgeMel(col, t) {
+function judgeMel(col: number, t: number): void {
   const w = win();
   const pitchOn = settings.pitchJudge;
   const r = nearestMel(t, col, pitchOn);
-  const geom = { cx: S.layout.mel.x + S.layout.mel.colW * (col + 0.5), w: 40 };
+  const geom = { cx: S.layout.mel!.x + S.layout.mel!.colW * (col + 0.5), w: 40 };
 
   if (pitchOn) {
     if (r.best && r.bd <= w.good) {
@@ -1718,9 +2049,9 @@ function judgeMel(col, t) {
   AudioEng.playHit({ track: 'mel', col });
 }
 
-function startHold(t, pid) {
+function startHold(t: number, pid: number): void {
   const w = win();
-  let best = null, bd = 1e9;
+  let best: Note | null = null, bd = 1e9;
   for (let i = 0; i < S.notes.length; i++) {
     const n = S.notes[i];
     if (n.track !== 'pad' || n.status !== 'pending') continue;
@@ -1738,7 +2069,7 @@ function startHold(t, pid) {
   }
 }
 
-function endHold(t) {
+function endHold(t: number): void {
   const n = S.holds.get('pad');
   if (!n) return;
   S.holds.delete('pad');
@@ -1754,16 +2085,16 @@ function endHold(t) {
     updateComboUI();
     return;
   }
-  S.stats[n.grade]++;
+  S.stats[n.grade as Judgement]++;
   S.devs.push(0);
-  const base = CFG.score[n.grade] * (held >= 0.9 ? 1 : held);
-  addScore(base, S.layout.pad.x + S.layout.pad.w / 2, S.layout.judgeY, n.grade);
+  const base = CFG.score[n.grade as Grade] * (held >= 0.9 ? 1 : held);
+  addScore(base, S.layout.pad!.x + S.layout.pad!.w / 2, S.layout.judgeY, n.grade as Judgement);
 }
 
 /* ============================================================
    主循环
    ============================================================ */
-function update(t) {
+function update(t: number): void {
   const w = win();
   const now = AudioEng.now();
 
@@ -1820,8 +2151,8 @@ function update(t) {
 /* ---- 场景驱动：把节拍 / 命中 / 连击喂给 GL ---- */
 const Clock = { t0: 0 };
 
-function sceneTick() {
-  if (!window.Scene || !Scene.gl) return;
+function sceneTick(): void {
+  if (!Scene.gl) return;
   const t = performance.now() / 1000;
   if (t - Scene.lastDraw < 0.032) return;
   Scene.lastDraw = t;
@@ -1852,7 +2183,7 @@ function sceneTick() {
 
 /* 切场景：主题色写进 THEME（canvas 用）与 CSS 变量（UI 用），两边必须同源。
    CSS 变量在这里落，是因为 canvas 与 DOM 都要读，放在最底层最省事。 */
-function applyScene(song) {
+function applyScene(song: Song): void {
   const sc = SCENES[song.scene] || SCENES.lofi;
 
   THEME.a = sc.a;
@@ -1868,14 +2199,14 @@ function applyScene(song) {
   root.setProperty('--accent-rgb', THEME.rgbStr);
   root.setProperty('--accent-b-rgb', THEME.rgbBStr);
 
-  if (window.Scene && Scene.gl) {
-    Scene.canvas.style.opacity = settings.sceneOn ? '1' : '0';
+  if (Scene.gl) {
+    Scene.canvas!.style.opacity = settings.sceneOn ? '1' : '0';
     if (settings.sceneOn) Scene.use(song.scene);
   }
   emit();
 }
 
-function loop() {
+function loop(): void {
   requestAnimationFrame(loop);
   sceneTick();
   if (S.phase === 'home' || S.phase === 'result') return;
@@ -1891,7 +2222,7 @@ function loop() {
 }
 
 /* 预备拍：只把「现在该数到几」广播出去，动画交给 React 重新挂载 */
-function updateCountdown(t) {
+function updateCountdown(t: number): void {
   const next = (t < 0 && S.phase === 'playing')
     ? clamp(Math.ceil(-t / (60 / S.song.bpm)), 1, CFG.time.countdownBeats)
     : 0;
@@ -1904,7 +2235,7 @@ function updateCountdown(t) {
 /* ============================================================
    开局 / 结束
    ============================================================ */
-export function startRun() {
+export function startRun(): void {
   AudioEng.init();
   AudioEng.setMute(!settings.sound);
 
@@ -1957,7 +2288,7 @@ export function startRun() {
 }
 
 /* 演奏中的速度读数：让「每 16 小节 +10」这件事在屏幕上看得见 */
-function updateHudBpm(t) {
+function updateHudBpm(t: number): void {
   if (S.mode !== 'rhythm' || !S.bars.length) {
     if (S.hudBpm !== '') { S.hudBpm = ''; emit(); }
     return;
@@ -1972,7 +2303,7 @@ function updateHudBpm(t) {
   }
 }
 
-function endRun() {
+function endRun(): void {
   if (S.phase === 'result') return;
   S.phase = 'result';
   Backing.stop();
@@ -1990,7 +2321,7 @@ function endRun() {
   let g = 'D';
   for (const [th, letter] of CFG.grade) { if (acc >= th) { g = letter; break; } }
 
-  const rows = [
+  const rows: ResultRow[] = [
     { k: '准确率', v: acc * 100 },
     { k: '稳定度', v: stability },
     S.mode === 'rhythm' && holdJudge()
@@ -1999,13 +2330,13 @@ function endRun() {
   ];
 
   const buckets = 21;
-  const counts = new Array(buckets).fill(0);
+  const counts: number[] = new Array(buckets).fill(0);
   S.devs.forEach((d) => {
     const i = clamp(Math.floor((d + 105) / 10), 0, buckets - 1);
     counts[i]++;
   });
   const max = Math.max(1, ...counts);
-  const histo = counts.map((c, i) => ({
+  const histo: HistogramCell[] = counts.map((c, i) => ({
     h: c === 0 ? 0 : Math.max(8, (c / max) * 100),
     kind: i === 10 ? 'zero' : i < 10 ? 'early' : 'late',
   }));
@@ -2049,13 +2380,13 @@ function endRun() {
 let flashSeq = 0;
 let comboSeq = 0;
 let bpmSeq = 0;
-function flash() { flashSeq++; }
-function bumpCombo() { comboSeq++; }
+function flash(): void { flashSeq++; }
+function bumpCombo(): void { comboSeq++; }
 
-let vm = null;
-const listeners = new Set();
+let vm: Snapshot | null = null;
+const listeners = new Set<() => void>();
 
-function snapshot() {
+function snapshot(): Snapshot {
   return {
     phase: S.phase,
     mode: S.mode,
@@ -2087,24 +2418,24 @@ function snapshot() {
   };
 }
 
-function emit() {
+function emit(): void {
   vm = snapshot();
   listeners.forEach((fn) => { try { fn(); } catch (e) { console.error(e); } });
 }
 
-export function subscribe(fn) {
+export function subscribe(fn: () => void): () => void {
   listeners.add(fn);
   return () => listeners.delete(fn);
 }
 
-export function getSnapshot() {
+export function getSnapshot(): Snapshot {
   if (!vm) vm = snapshot();
   return vm;
 }
 
 /* 节奏模式用「风格」生成一个虚拟曲目：拍号、场景、BPM 全部跟着风格走，
    这样 applyScene / 节拍 / 主题色都能沿用原来的通路。 */
-function styleSong() {
+function styleSong(): Song {
   const st = curStyle();
   return {
     id: 'style:' + st.id, name: st.label, tag: st.cn, scene: st.scene,
@@ -2115,7 +2446,7 @@ function styleSong() {
 
 /* ---- 命令 ---- */
 
-export function setMode(mode) {
+export function setMode(mode: Mode): void {
   S.mode = mode;
   // 进出节奏模式时切换「曲目 / 风格」这套语境
   S.song = mode === 'rhythm'
@@ -2126,19 +2457,19 @@ export function setMode(mode) {
   emit();
 }
 
-export function setDiff(diff) {
+export function setDiff(diff: Difficulty): void {
   S.diff = diff;
   emit();
 }
 
-export function setSong(id) {
+export function setSong(id: string): void {
   S.pick = id;
   S.song = SONGS.find((x) => x.id === id) || SONGS[0];
   applyScene(S.song);
   emit();
 }
 
-export function setStyle(id) {
+export function setStyle(id: StyleId): void {
   if (!STYLES[id]) return;
   S.style = id;
   const st = curStyle();
@@ -2152,7 +2483,7 @@ export function setStyle(id) {
   emit();
 }
 
-export function stepBpm(delta) {
+export function stepBpm(delta: number): void {
   settings.bpm = clamp(curBpm() + delta, 40, 200);
   S.bpmBase = settings.bpm;
   persist();
@@ -2162,7 +2493,7 @@ export function stepBpm(delta) {
   emit();
 }
 
-export function setSettings(patch) {
+export function setSettings(patch: Partial<Settings>): void {
   Object.assign(settings, patch);
   persist();
   if ('sound' in patch) AudioEng.setMute(!settings.sound);
@@ -2173,18 +2504,20 @@ export function setSettings(patch) {
   emit();
 }
 
-export function pause() {
+export function pause(): void {
   if (S.phase !== 'playing') return;
   S.phase = 'paused';
-  if (AudioEng.ctx) { S.pausedAt = AudioEng.ctx.currentTime; AudioEng.ctx.suspend(); }
+  const ac = AudioEng.ctx;
+  if (ac) { S.pausedAt = ac.currentTime; ac.suspend(); }
   emit();
 }
 
-export function resume() {
+export function resume(): void {
   if (S.phase !== 'paused') return;
-  if (AudioEng.ctx) {
-    AudioEng.ctx.resume().then(() => {
-      S.startTime += AudioEng.ctx.currentTime - S.pausedAt;
+  const ac = AudioEng.ctx;
+  if (ac) {
+    ac.resume().then(() => {
+      S.startTime += ac.currentTime - S.pausedAt;
       S.phase = 'playing';
       emit();
     });
@@ -2194,34 +2527,35 @@ export function resume() {
   }
 }
 
-export function quit() {
-  if (AudioEng.ctx) AudioEng.ctx.resume();
+export function quit(): void {
+  const ac = AudioEng.ctx;
+  if (ac) ac.resume();
   S.phase = 'playing';
   endRun();
 }
 
 /* 48 小节走完，BPM 再加一档，接着下一轮 */
-export function speedUp() {
+export function speedUp(): void {
   S.bpmBase = S.lastBpm + RHYTHM_STEP;
   settings.bpm = S.bpmBase;
   persist();
   startRun();
 }
 
-export function again() { startRun(); }
+export function again(): void { startRun(); }
 
-export function goHome() {
+export function goHome(): void {
   S.phase = 'home';
   if (ctx) ctx.clearRect(0, 0, view.w, view.h);
   emit();
 }
 
-export function press(x, pointerId) {
+export function press(x: number, pointerId: number): void {
   if (S.phase !== 'playing') return;
   handleHit(x, pointerId);
 }
 
-export function release(pointerId) {
+export function release(pointerId: number): void {
   if (S.phase !== 'playing') return;
   const p = S.holds.get('pad');
   if (p && p.pid === pointerId) endHold(elapsed());
@@ -2233,15 +2567,15 @@ export function release(pointerId) {
 
 let booted = false;
 
-export function boot(opts) {
+export function boot(opts: { stage: HTMLCanvasElement; glbg: HTMLCanvasElement }): void {
   if (booted) return;
   booted = true;
 
   canvas = opts.stage;
-  ctx = canvas.getContext('2d');
+  ctx = canvas.getContext('2d') as CanvasRenderingContext2D;
   Clock.t0 = performance.now() / 1000;
 
-  const glOk = window.Scene ? Scene.init(opts.glbg) : false;
+  const glOk = Scene.init(opts.glbg);
   if (!glOk) console.warn('[omb] WebGL 不可用，回退纯色背景');
 
   if (settings.style && STYLES[settings.style]) S.style = settings.style;
