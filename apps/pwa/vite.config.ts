@@ -165,15 +165,32 @@ export default defineConfig(({ mode }) => ({
       },
       workbox: {
         // 采样一共 312KB，直接进 precache：离线也能完整玩，不用等第二轮下载
-        globPatterns: ['**/*.{js,css,html,svg,png,ico,mp3,woff2}'],
+        globPatterns: ['**/*.{js,css,svg,png,ico,mp3,woff2}'],
         // version.json 绝不能进缓存，否则「检查更新」永远拿到旧值；
         // 分享图和安装截图只有浏览器 UI 和社交爬虫会要，不占用户的离线配额
         globIgnores: ['**/version.json', '**/og.png', '**/screenshots/**'],
-        navigateFallback: 'index.html',
+        /* HTML 不进 precache，导航走 NetworkFirst（见下面的 runtimeCaching）。
+           把 index.html 也塞进 precache 是 PWA 更新最容易踩的坑：SW 会用缓存的旧壳
+           响应导航，而旧壳引用的带 hash 的资源早随新构建删了 —— 用户看到的是白屏，
+           或者「更新了但界面还是老的」，怎么刷新都没用。
+           navigateFallback 必须一起关掉，否则它又会把导航固定回 precache 的 index。 */
+        navigateFallback: null,
         cleanupOutdatedCaches: true,
-        // 首次激活就接管当前页面：否则第一次访问的导航不会被 SW 拦截，
-        // 换到只要带 ?sharecode 才给 HTML 的托管上，刷新一次就会掉进网关的错误页
+        /* 首次激活就接管当前页面：否则第一次访问的导航不会被 SW 拦截，
+           换到只要带 ?sharecode 才给 HTML 的托管上，刷新一次就会掉进网关的错误页 */
         clientsClaim: true,
+        runtimeCaching: [
+          {
+            urlPattern: ({ request }: { request: Request }) => request.mode === 'navigate',
+            handler: 'NetworkFirst' as const,
+            options: {
+              cacheName: 'omb-html',
+              // 3 秒拿不到就先用缓存顶上，地铁里也不会干等
+              networkTimeoutSeconds: 3,
+              expiration: { maxEntries: 4, maxAgeSeconds: 60 * 60 * 24 * 7 },
+            },
+          },
+        ],
       },
       devOptions: { enabled: false },
     }),
