@@ -97,7 +97,7 @@
     </script>
     <!-- 首屏兜底：JS 没到位时至少是个 O 在呼吸，而不是一片纯黑 -->
     <style>html,body{color:#e7ecf3;background:#07090d}#boot[hidden]{display:none}#boot{z-index:9998;place-items:center;display:grid;position:fixed;top:0;bottom:0;left:0;right:0}#boot i{-webkit-mask-composite:xor;background:linear-gradient(140deg,#5b8cff,#35d0ba) border-box;border:5px solid #0000;border-radius:999px;width:54px;height:54px;animation:1.4s ease-in-out infinite boot-pulse;-webkit-mask-image:linear-gradient(#000 0 0),linear-gradient(#000 0 0);-webkit-mask-position:0 0,0 0;-webkit-mask-size:auto,auto;-webkit-mask-repeat:repeat,repeat;-webkit-mask-clip:padding-box,border-box;-webkit-mask-origin:padding-box,border-box;-webkit-mask-composite:xor;mask-composite:exclude;-webkit-mask-source-type:auto,auto;mask-mode:match-source,match-source}@keyframes boot-pulse{0%,to{opacity:.35;transform:scale(.94)}50%{opacity:1;transform:scale(1)}}@media (prefers-reduced-motion:reduce){#boot i{opacity:.8;animation:none}}#fatal{z-index:9999;background:#07090d;place-items:center;padding:24px;font:14px/1.7 -apple-system,PingFang SC,Microsoft YaHei,system-ui,BlinkMacSystemFont,Segoe UI,Roboto,Noto Sans,Ubuntu,Cantarell,Helvetica Neue,sans-serif;display:grid;position:fixed;top:0;bottom:0;left:0;right:0}#fatal[hidden]{display:none}#fatal .card{background:#12161ee6;border:1px solid #ffffff1a;border-radius:14px;width:100%;max-width:420px;padding:24px 20px}#fatal b{margin-bottom:6px;font-size:15px;display:block}#fatal p{color:#98a0b0;margin:0 0 12px;font-size:12.5px}#fatal pre{color:#8ea2bb;white-space:pre-wrap;word-break:break-all;background:#00000073;border-radius:8px;max-height:30vh;margin:0 0 16px;padding:10px 12px;font:11px/1.6 ui-monospace,Menlo,monospace;overflow:auto}#fatal button{-webkit-appearance:none;appearance:none;font:inherit;cursor:pointer;border:0;border-radius:999px;margin-right:8px;padding:9px 16px;font-size:13px}#fatal [data-retry]{color:#06100e;background:linear-gradient(140deg,#35d0ba,#5b8cff);font-weight:600}#fatal [data-reset]{color:#e7ecf3;background:#ffffff14}</style>
-    <script type="module" crossorigin src="/o-beat/assets/index-Pquh99S5.js"></script>
+    <script type="module" crossorigin src="/o-beat/assets/index-Be80V1R5.js"></script>
     <link rel="stylesheet" crossorigin href="/o-beat/assets/index-m8Yq-6-s.css">
   <link rel="manifest" href="/o-beat/manifest.webmanifest"></head>
   <body>
@@ -146,9 +146,6 @@
       </div>
     </noscript>
 
-  </body>
-</html>
-
     <!-- 启动看门狗：正常情况 #root 里早就长出 .app-shell 了。
          8 秒还是空的，说明脚本没跑起来（离线缓存错乱、浏览器拦了资源、
          某条旧代码在初始化时抛异常），这时候必须把原因显示出来，
@@ -185,7 +182,20 @@
           function (e) {
             var tag = e.target && e.target.tagName;
             if (tag === 'SCRIPT' || tag === 'LINK') {
-              errs.push('资源加载失败：' + (e.target.src || e.target.href || ''));
+              var bad = e.target.src || e.target.href || '';
+              errs.push('资源加载失败：' + bad);
+              /* 最常见的那种坏法：CDN 缓存了旧 HTML，而它引用的带 hash 的 JS
+                 已经随新构建从服务器上删掉了 —— 页面永远起不来，刷新多少次都一样。
+                 只有带一个新的查询串重新请求，才能把 HTML 也一起换掉。
+                 只试一次，避免真的资源缺失时无限重载。 */
+              try {
+                if (/\/assets\//.test(bad) && !sessionStorage.getItem('omb.assetRetry')) {
+                  sessionStorage.setItem('omb.assetRetry', '1');
+                  var u = new URL(location.href);
+                  u.searchParams.set('_r', Date.now().toString(36));
+                  location.replace(u.toString());
+                }
+              } catch (err) {}
             } else {
               errs.push(
                 (e.message || '脚本错误') +
