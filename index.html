@@ -6,17 +6,238 @@
       name="viewport"
       content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover"
     />
+
+    <title>O My Beat · 网页节奏与音感训练游戏</title>
+    <meta
+      name="description"
+      content="O My Beat 是一款打开即玩的网页节奏训练游戏：鼓手、旋律家、节奏三种模式，Straight / Swing / Bossa / Math Rock 四种风格，48 小节 BPM 阶梯提速，支持离线游玩与安装到桌面。"
+    />
+    <meta name="keywords" content="节奏训练,音感训练,节奏游戏,架子鼓练习,视唱练耳,BPM 练习,PWA,在线音乐游戏" />
+    <meta name="author" content="aispin" />
+    <meta name="robots" content="index, follow, max-image-preview:large" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="format-detection" content="telephone=no" />
+    <meta name="application-name" content="O My Beat" />
     <meta name="theme-color" content="#07090D" />
+    <link rel="canonical" href="https://aispin.github.io/o-beat/" />
+
+    <!-- Open Graph / 社交卡片 -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="O My Beat" />
+    <meta property="og:locale" content="zh_CN" />
+    <meta property="og:title" content="O My Beat · 网页节奏与音感训练游戏" />
+    <meta
+      property="og:description"
+      content="三种演奏模式、四种风格、48 小节阶梯提速。打开就能练，装到桌面还能离线玩。"
+    />
+    <meta property="og:url" content="https://aispin.github.io/o-beat/" />
+    <meta property="og:image" content="https://aispin.github.io/o-beat/og.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="O My Beat — 节奏与音感训练" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="O My Beat · 网页节奏与音感训练游戏" />
+    <meta
+      name="twitter:description"
+      content="三种演奏模式、四种风格、48 小节阶梯提速。打开就能练，装到桌面还能离线玩。"
+    />
+    <meta name="twitter:image" content="https://aispin.github.io/o-beat/og.png" />
+
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="O My Beat" />
     <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
     <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
-    <title>O My Beat</title>
-    <script type="module" crossorigin src="/o-beat/assets/index-D4tGMx7F.js"></script>
-    <link rel="stylesheet" crossorigin href="/o-beat/assets/index-BSlWszur.css">
+
+    <!-- 结构化数据：让搜索引擎把它当成一个可免费使用的 Web 应用，而不是一篇文章 -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
+        "name": "O My Beat",
+        "alternateName": "O My Beat 节奏训练",
+        "url": "https://aispin.github.io/o-beat/",
+        "description": "打开即玩的网页节奏与音感训练游戏，含鼓手、旋律家、节奏三种模式，四种曲风，48 小节 BPM 阶梯提速，支持离线与安装到桌面。",
+        "applicationCategory": "GameApplication",
+        "applicationSubCategory": "Music",
+        "operatingSystem": "Web, Android, iOS, macOS, Windows",
+        "browserRequirements": "需要支持 Service Worker 的现代浏览器",
+        "inLanguage": "zh-CN",
+        "isAccessibleForFree": true,
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "CNY" },
+        "image": "https://aispin.github.io/o-beat/og.png",
+        "screenshot": "https://aispin.github.io/o-beat/og.png",
+        "featureList": [
+          "鼓手模式：四轨打击，练节奏稳定性",
+          "旋律家模式：双轨旋律，练音高与音感",
+          "节奏模式：单轨时值，入门到挑战三档",
+          "四种风格：Straight、Swing、Bossa、Math Rock",
+          "48 小节阶梯提速，结算可续关加速",
+          "离线可玩，可安装到桌面与主屏幕"
+        ],
+        "author": { "@type": "Person", "name": "aispin" }
+      }
+    </script>
+
+    <!-- 在 React 挂载之前接住安装事件：beforeinstallprompt 只会抛一次，错过就没了 -->
+    <script>
+      window.__ombBIP = null;
+      addEventListener('beforeinstallprompt', function (e) {
+        e.preventDefault();
+        window.__ombBIP = e;
+        dispatchEvent(new Event('omb:bip-ready'));
+      });
+      addEventListener('appinstalled', function () {
+        window.__ombBIP = null;
+        dispatchEvent(new Event('omb:installed'));
+      });
+    </script>
+    <!-- 首屏兜底：JS 没到位时至少是个 O 在呼吸，而不是一片纯黑 -->
+    <style>html,body{color:#e7ecf3;background:#07090d}#boot[hidden]{display:none}#boot{z-index:9998;place-items:center;display:grid;position:fixed;inset:0}#boot i{-webkit-mask-composite:xor;background:linear-gradient(140deg,#5b8cff,#35d0ba) border-box;border:5px solid #0000;border-radius:999px;width:54px;height:54px;animation:1.4s ease-in-out infinite boot-pulse;-webkit-mask-image:linear-gradient(#000 0 0),linear-gradient(#000 0 0);-webkit-mask-position:0 0,0 0;-webkit-mask-size:auto,auto;-webkit-mask-repeat:repeat,repeat;-webkit-mask-clip:padding-box,border-box;-webkit-mask-origin:padding-box,border-box;-webkit-mask-composite:xor;mask-composite:exclude;-webkit-mask-source-type:auto,auto;mask-mode:match-source,match-source}@keyframes boot-pulse{0%,to{opacity:.35;transform:scale(.94)}50%{opacity:1;transform:scale(1)}}@media (prefers-reduced-motion:reduce){#boot i{opacity:.8;animation:none}}#fatal{z-index:9999;background:#07090d;place-items:center;padding:24px;font:14px/1.7 -apple-system,PingFang SC,Microsoft YaHei,system-ui,sans-serif;display:grid;position:fixed;inset:0}#fatal[hidden]{display:none}#fatal .card{background:#12161ee6;border:1px solid #ffffff1a;border-radius:14px;width:100%;max-width:420px;padding:24px 20px}#fatal b{margin-bottom:6px;font-size:15px;display:block}#fatal p{color:#98a0b0;margin:0 0 12px;font-size:12.5px}#fatal pre{color:#8ea2bb;white-space:pre-wrap;word-break:break-all;background:#00000073;border-radius:8px;max-height:30vh;margin:0 0 16px;padding:10px 12px;font:11px/1.6 ui-monospace,Menlo,monospace;overflow:auto}#fatal button{appearance:none;font:inherit;cursor:pointer;border:0;border-radius:999px;margin-right:8px;padding:9px 16px;font-size:13px}#fatal [data-retry]{color:#06100e;background:linear-gradient(140deg,#35d0ba,#5b8cff);font-weight:600}#fatal [data-reset]{color:#e7ecf3;background:#ffffff14}</style>
+    <script type="module" crossorigin src="/o-beat/assets/index-UVgx615c.js"></script>
+    <link rel="stylesheet" crossorigin href="/o-beat/assets/index-rlYPqyRt.css">
   <link rel="manifest" href="/o-beat/manifest.webmanifest"></head>
   <body>
+    <div id="boot"><i></i></div>
     <div id="root"></div>
+    <div id="fatal" hidden>
+      <div class="card">
+        <b>没能启动起来</b>
+        <p>把下面这段发给开发者，能直接定位原因。</p>
+        <pre>未知原因</pre>
+        <button type="button" data-retry>重试</button>
+        <button type="button" data-reset>清缓存重试</button>
+      </div>
+    </div>
+
+    <!-- 搜索引擎与禁 JS 环境的兜底：应用本体是 canvas，抓不到任何文本 -->
+    <noscript>
+      <div
+        style="
+          max-width: 640px;
+          margin: 0 auto;
+          padding: 48px 24px;
+          font: 16px/1.75 -apple-system, 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+          color: #e7ecf3;
+          background: #07090d;
+        "
+      >
+        <h1 style="font-size: 26px; margin: 0 0 8px; letter-spacing: 2px">O My Beat</h1>
+        <p style="color: #9aa6b8; margin: 0 0 24px">节奏练习 · 音感训练</p>
+        <p>
+          O My Beat 是一款打开即玩的网页节奏训练游戏。它把「跟拍子」这件事拆成三种练法：
+          <strong>鼓手</strong>练四轨打击的稳定性，<strong>旋律家</strong>练双轨旋律的音高与音感，
+          <strong>节奏</strong>只给一条轨，专心练时值长短。
+        </p>
+        <p>
+          风格上提供 Straight、Swing、Bossa、Math Rock 四种曲风，拍号随风格走（4/4 与 7/8）。
+          一局 48 小节，每 16 小节自动提速 10 BPM，难度是滚上去的而不是一开始就压死。
+        </p>
+        <p>
+          游戏需要 JavaScript 与 Web Audio 才能运行。当前浏览器禁用了 JavaScript，
+          请开启后刷新，或换用 Chrome / Edge / Safari 的最新版本。
+        </p>
+        <p style="color: #6b7688; font-size: 13px; margin-top: 32px">
+          支持离线游玩，可以安装到桌面或主屏幕，像本地应用一样启动。
+        </p>
+      </div>
+    </noscript>
+
   </body>
 </html>
+
+    <!-- 启动看门狗：正常情况 #root 里早就长出 .app-shell 了。
+         8 秒还是空的，说明脚本没跑起来（离线缓存错乱、浏览器拦了资源、
+         某条旧代码在初始化时抛异常），这时候必须把原因显示出来，
+         否则用户看到的只是「黑屏」，连反馈都无从说起。 -->
+    <script>
+      (function () {
+        var errs = [];
+        var box = document.getElementById('fatal');
+
+        function envInfo() {
+          var sw = 'serviceWorker' in navigator ? '注册中' : '不支持';
+          try {
+            if (navigator.serviceWorker && navigator.serviceWorker.controller) sw = '已接管';
+          } catch (e) {}
+          return [
+            'UA: ' + navigator.userAgent,
+            '视口: ' + innerWidth + '×' + innerHeight + ' @' + (devicePixelRatio || 1) + 'x',
+            'SW: ' + sw,
+            '入口: ' + location.origin + location.pathname,
+          ].join('\n');
+        }
+
+        function show() {
+          if (!box || !box.hidden) return;
+          box.hidden = false;
+          var boot = document.getElementById('boot');
+          if (boot) boot.hidden = true;
+          box.querySelector('pre').textContent =
+            (errs.length ? errs.join('\n') : '没有任何报错，但页面就是没渲染出来') + '\n\n' + envInfo();
+        }
+
+        addEventListener(
+          'error',
+          function (e) {
+            var tag = e.target && e.target.tagName;
+            if (tag === 'SCRIPT' || tag === 'LINK') {
+              errs.push('资源加载失败：' + (e.target.src || e.target.href || ''));
+            } else {
+              errs.push(
+                (e.message || '脚本错误') +
+                  (e.filename ? ' @ ' + String(e.filename).split('/').pop() + ':' + e.lineno : ''),
+              );
+            }
+          },
+          true,
+        );
+        addEventListener('unhandledrejection', function (e) {
+          var r = e.reason;
+          errs.push('未处理的 Promise：' + ((r && (r.message || r)) || ''));
+        });
+
+        function check() {
+          if (document.documentElement.dataset.omb !== 'ready') show();
+        }
+        window.__ombShowFatal = function (msg) {
+          if (msg) errs.push(String(msg));
+          show();
+        };
+        setTimeout(check, 8000);
+        addEventListener('load', function () {
+          setTimeout(check, 1500);
+        });
+        box.querySelector('[data-retry]').onclick = function () {
+          location.reload();
+        };
+        box.querySelector('[data-reset]').onclick = function () {
+          var done = function () {
+            location.reload();
+          };
+          if (!('serviceWorker' in navigator)) return done();
+          var jobs = [];
+          if (window.caches) {
+            jobs.push(
+              caches.keys().then(function (keys) {
+                return Promise.all(keys.map(function (k) {
+                  return caches.delete(k);
+                }));
+              }),
+            );
+          }
+          jobs.push(
+            navigator.serviceWorker.getRegistrations().then(function (rs) {
+              return Promise.all(rs.map(function (r) {
+                return r.unregister();
+              }));
+            }),
+          );
+          Promise.all(jobs).then(done, done);
+        };
+      })();
+    </script>
+
+  </body>
+</html>
+
