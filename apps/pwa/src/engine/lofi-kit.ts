@@ -111,14 +111,8 @@ const TAPE: Kit = {
 let dark = Math.random() < 0.5;
 
 /** 换曲 / 换鼓组时重新掷一次。同一首里不改，免得军鼓忽高忽低 */
-export function reroll(): boolean {
+export function reroll(): void {
   dark = Math.random() < 0.5;
-  return dark;
-}
-
-/** 当前这套是不是"更暗"那套，调试与自检用 */
-export function isDark(): boolean {
-  return dark;
 }
 
 /* ---------------- 噪声与曲线（按 AudioContext 缓存） ---------------- */

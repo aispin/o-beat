@@ -171,7 +171,3 @@ export function useAppUpdate(): UpdateState {
     check,
   };
 }
-
-export const BUILD_ID = __BUILD_ID__;
-export const APP_VERSION = __APP_VERSION__;
-export const BUILD_TIME = __BUILD_TIME__;

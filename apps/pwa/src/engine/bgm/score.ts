@@ -9,6 +9,9 @@ import { scoreFromAbc } from '../abc';
 
 export const BARS = 8;
 
+/** 认不出的和弦名兜底：C 大三和弦（低音区根音 + 中音区三个音） */
+const FALLBACK_CHORD: Chord = { root: 36, tones: [48, 52, 55] };
+
 const MOTIFS = [
   [0, 1, 2, 1, 2, 1],
   [2, 1, 0, 1, 2, 0],
@@ -98,12 +101,7 @@ export function buildScore(song?: SongLike): Score {
   const hand = s.id ? COMPOSE[s.id] : undefined;
   const fb = FALLBACK_VOICE[s.scene || 'cyber'] || FALLBACK_VOICE.cyber;
 
-  const chords: Chord[] = names.map((n) => {
-    const r = chordOf(n);
-    if (r) return r.chord;
-    const fb = chordOf('C');
-    return (fb as { chord: Chord }).chord;
-  });
+  const chords: Chord[] = names.map((n) => chordOf(n)?.chord ?? FALLBACK_CHORD);
 
   const prog: number[] = [];
   for (let bar = 0; bar < BARS; bar++) prog.push(PROG_SHAPE[bar] % chords.length);
@@ -139,7 +137,7 @@ export function buildScore(song?: SongLike): Score {
     echo: hand && hand.echo ? hand.echo : 0,
     tape: hand && hand.tape ? hand.tape : 0,
     swing: hand && hand.swing ? hand.swing : 0,
-    // 曲目系统（backing.js）按这几个字段排伴奏与谱面
+    // 曲目系统（backing.ts）按这几个字段排伴奏与谱面
     bassOct: meter === 3 ? [0, 0, 7, 0, 7, 12] : BASS_OCT,
     arpOrder: ARP_ORDER,
     arcade: !!s.arcade,

@@ -477,8 +477,6 @@ const SOURCES: Record<string, string> = { cyber: CYBER, classic: CLASSIC, lofi: 
 
 /* ---------------- 引擎 ---------------- */
 
-export type SceneName = 'cyber' | 'classic' | 'lofi' | 'rock' | 'pixel';
-
 export interface SceneApi {
   canvas: HTMLCanvasElement | null;
   gl: WebGLRenderingContext | null;

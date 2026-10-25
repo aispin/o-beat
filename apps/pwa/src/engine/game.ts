@@ -416,7 +416,7 @@ const RHYTHM_SEG = 16;
 const RHYTHM_STEP = 10;
 
 const SONGS: Song[] = [
-  /* 唯一一首「有谱」的曲子：编曲来自 bgm.js 那份 8bit 循环。
+  /* 唯一一首「有谱」的曲子：编曲来自 bgm/compose.ts 的 ARCADE_MEL。
      旋律不预录，玩家打的每个音就是旋律本身。放在首位，也是缺省曲目。 */
   { id: 'arcade',name: '像素心跳', tag: '8bit · 方波', scene: 'pixel',   bpm: 132, meter: 4, root: 69, scale: 'min', chords: ['Am', 'F', 'C', 'G'],
     arcade: true, inst: 'chip', kit: 'chip', space: 'chip' },
@@ -581,7 +581,7 @@ function persist(): void {
 
 /* ============================================================
    音频适配层
-   发声在 sfx.js（采样 + 物理建模 + 混响），编曲在 backing.js
+   发声在 sfx.ts（采样 + 物理建模 + 混响），编曲在 backing.ts
    ============================================================ */
 const AudioEng = {
   get ctx(): AudioContext | null { return SFX.ctx; },
@@ -650,7 +650,7 @@ function sectionOf(bar: number): number {
 }
 
 /* 鼓手模式的有谱谱面：打的就是编曲那套鼓 —— 底鼓 1/4/4&、军鼓 2/4。
-   位置和 backing.js 里 buildArcade 排的事件一一对应，所以敲下去
+   位置和 backing.ts 里 buildArcade 排的事件一一对应，所以敲下去
    跟伴奏是同一个点，不会有"打到空处"的错位感。 */
 function buildArcadeDrumChart(song: Song): Note[] {
   const beat = 60 / song.bpm;

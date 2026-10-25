@@ -23,6 +23,10 @@
 │  │  ├─ sfx.ts         对局音频：采样 + 物理建模 + 卷积混响 + 程序化音效
 │  │  ├─ scene.ts       WebGL 氛围层（5 套 GLSL）
 │  │  ├─ backing.ts     伴奏排程（按 GROOVE 生成鼓 / 贝斯 / 和声）
+│  │  ├─ lofi-kit.ts    lofi 套鼓：纯合成，两套预设随机
+│  │  ├─ tape.ts        磁带底噪：嘶声 + 噼啪，离线渲染成 9.7s 循环
+│  │  ├─ space.ts       BGM 混响的房间冲激响应（算出来的，无素材）
+│  │  ├─ chords.ts      和弦名 → 三个音（手写编曲与 ABC 共用）
 │  │  ├─ abc/           ABC 谱引擎：parse → style → toScore
 │  │  └─ bgm/           背景音乐：compose → score → arrange → voices
 │  ├─ src/songs/        谱库：一首一个 .abc
@@ -112,7 +116,8 @@ pnpm preview          # 4173
 
 ## 部署
 
-- **WorkBuddy**：发布 `apps/pwa/dist`（静态站，`python3 -m http.server $PORT`）。
+- **WorkBuddy**：发布 `apps/pwa/dist`（静态站，`python3 serve.py`；`public/serve.py`
+  按类型发缓存头 —— HTML / `sw.js` / `version.json` 一律 `no-store`，`/assets/*` 长缓存）。
 - **GitHub Pages**：`pnpm build:gh` 后把 `dist` 推到 `gh-pages` 分支。`.nojekyll` 已随构建产出。
 
 发布到 WorkBuddy 的分享域名时，**必须带上 sharecode 构建**：

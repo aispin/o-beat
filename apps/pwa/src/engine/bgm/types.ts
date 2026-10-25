@@ -119,7 +119,7 @@ export interface Score {
   tape: number;
   /** 奇数十六分位推后的秒数。0 = 正拍；lofi 用 0.012 */
   swing: number;
-  /** 给曲目系统（backing.js）排伴奏用 */
+  /** 给曲目系统（backing.ts）排伴奏用 */
   bassOct: number[];
   arpOrder: number[];
   arcade: boolean;

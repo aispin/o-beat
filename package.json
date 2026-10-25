@@ -1,7 +1,7 @@
 {
   "name": "o-beat",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "packageManager": "pnpm@12.14.0",
   "scripts": {
     "dev": "pnpm --filter @o-beat/pwa dev",
